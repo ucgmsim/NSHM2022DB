@@ -151,8 +151,6 @@ def insert_ruptures(conn, indices):
 if __name__ == "__main__":
     with open("fault_sections.geojson", "r") as fault_file:
         geojson_object = json.load(fault_file)
-        # merged_fault_map = subsection_parent_map(geojson_object["features"])
-        # parent_lookup = subsection_parent_lookup(geojson_object["features"])
     with open("fast_indices.csv", "r") as csv_file_handle:
         csv_reader = csv.DictReader(csv_file_handle)
         indices = list(csv_reader)

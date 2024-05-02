@@ -49,7 +49,7 @@ This repository contains a script and schema to generate a database storing faul
 2. Copy the `fault_sections.geojson` and `fast_indices.csv` file into the directory contaning the script.
 3. For some reason (pandas shenanigans?) the `fast_indices.csv` which maps between rupture ids and fault segment ids uses ints for the ruptures and *floats* for the fault segment ids. Run the following in the command line to turn the floats into integers.
 ```bash
-$ sed -i 's/\.0//' fast_indices.csv`
+$ sed -i 's/\.0//' fast_indices.csv
 ```
 4. Creating an empty `nshm2022.db` database file.
 ```bash
