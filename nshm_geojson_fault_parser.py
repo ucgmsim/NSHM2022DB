@@ -137,14 +137,14 @@ def subsection_parent_lookup(fault_features):
 
 def insert_ruptures(conn, indices):
     for row in indices:
-        rupture_idx, segment_idx = [int(value) for value in row.values()]
+        rupture_idx, fault_idx = [int(value) for value in row.values()]
         conn.execute(
             "INSERT OR REPLACE INTO rupture (rupture_id) VALUES (?)", (rupture_idx,)
         )
 
         conn.execute(
-            "INSERT INTO rupture_faults (rupture_id, segment_id) VALUES (?, ?)",
-            (rupture_idx, segment_idx),
+            "INSERT INTO rupture_faults (rupture_id, fault_id) VALUES (?, ?)",
+            (rupture_idx, fault_idx),
         )
 
 

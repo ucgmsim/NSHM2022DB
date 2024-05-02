@@ -35,8 +35,8 @@ CREATE TABLE IF NOT EXISTS rupture (
 CREATE TABLE IF NOT EXISTS rupture_faults (
     rupture_fault_id INTEGER PRIMARY KEY,
     rupture_id INTEGER NOT NULL,
-    segment_id INTEGER NOT NULL,
-    UNIQUE(rupture_id, segment_id)
-    FOREIGN KEY(segment_id) REFERENCES fault_segment(segment_id)
+    fault_id INTEGER NOT NULL,
+    UNIQUE(rupture_id, fault_id)
+    FOREIGN KEY(fault_id) REFERENCES fault(fault_id)
     FOREIGN KEY(rupture_id) REFERENCES rupture(rupture_id)
 );
