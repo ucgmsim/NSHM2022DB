@@ -1,26 +1,29 @@
 #!/usr/bin/env python3
-import json
 import csv
-import qcore.geo
-import numpy as np
+import json
 import sqlite3
 from sqlite3 import Connection
 from typing import Any
 
+import numpy as np
+import qcore.geo
 
-def strike_between_coordinates(a, b) -> float:
+
+def strike_between_coordinates(a: (float, float), b: (float, float)) -> float:
     a_lat, a_lon = a
     b_lat, b_lon = b
     return qcore.geo.ll_bearing(a_lon, a_lat, b_lon, b_lat)
 
 
-def distance_between(a, b) -> float:
+def distance_between(a: (float, float), b: (float, float)) -> float:
     a_lat, a_lon = a
     b_lat, b_lon = b
     return qcore.geo.ll_dist(a_lon, a_lat, b_lon, b_lat)
 
 
-def centre_point(a, b, dip, dip_dir, width):
+def centre_point(
+    a: (float, float), b: (float, float), dip: float, dip_dir: float, width: float
+) -> (float, float):
     a_lat, a_lon = a
     b_lat, b_lon = b
     c_lon, c_lat = qcore.geo.ll_mid(a_lon, a_lat, b_lon, b_lat)
@@ -28,43 +31,24 @@ def centre_point(a, b, dip, dip_dir, width):
     return qcore.geo.ll_shift(c_lat, c_lon, projected_width, dip_dir)
 
 
-def geojson_feature_to_fault(feature):
-    properties = feature["properties"]
-    dip = properties["DipDeg"]
-    rake = properties["Rake"]
-    dbottom = properties["LowDepth"]
-    dtop = properties["UpDepth"]
-    dip_dir = properties["DipDir"]
-    name = properties["ParentName"]
-    leading_edge = feature["geometry"]
-    width = float(dbottom / np.sin(np.radians(dip)))
-    segments = []
-    for i in range(len(leading_edge) - 1):
-        left = tuple(reversed(leading_edge[i]))
-        right = tuple(reversed(leading_edge[i + 1]))
-        c_lat, c_lon = centre_point(left, right, dip, dip_dir, dbottom)
-        strike = strike_between_coordinates(left, right)
-        length = distance_between(left, right)
-        segments.append(
-            fault.FaultSegment(
-                strike=strike,
-                rake=rake,
-                dip=dip,
-                dtop=dtop,
-                dbottom=dbottom,
-                length=length,
-                width=width,
-                dip_dir=dip_dir,
-                clon=c_lon,
-                clat=c_lat,
+def insert_magnitude_frequency_distribution(
+    conn: Connection, magnitude_frequency_distribution: list[dict[str, float | str]]
+):
+    for section_distribution in magnitude_frequency_distribution:
+        segment_id = int(section_distribution["Section Index"])
+        for magnitude_key, probability_raw in section_distribution.items():
+            if magnitude_key == "Section Index":
+                continue
+            magnitude = float(magnitude_key)
+            probability = float(probability_raw)
+            conn.execute(
+                "INSERT INTO magnitude_frequency_distribution (fault_id, magnitude, probability) VALUES (?, ?, ?)",
+                (segment_id, magnitude, probability),
             )
-        )
-    return fault.Fault(name=name, tect_type=None, segments=segments)
 
 
 def insert_faults(conn: Connection, fault_map: dict[str, Any]):
     for feature in fault_map:
-
         properties = feature["properties"]
         dip = properties["DipDeg"]
         rake = properties["Rake"]
@@ -77,7 +61,6 @@ def insert_faults(conn: Connection, fault_map: dict[str, Any]):
         fault_id = properties["FaultID"]
         parent_id = properties["ParentID"]
         parent_name = properties["ParentName"]
-        segments = []
         conn.execute(
             "INSERT OR REPLACE INTO parent_fault (parent_id, name) VALUES (?, ?)",
             (parent_id, parent_name),
@@ -110,7 +93,7 @@ def insert_faults(conn: Connection, fault_map: dict[str, Any]):
             )
 
 
-def subsection_parent_map(fault_features):
+def subsection_parent_map(fault_features: dict[str, Any]) -> dict[str, Any]:
     merged = {}
     for feature in fault_features:
         parent_name = feature["properties"]["ParentName"]
@@ -126,16 +109,16 @@ def subsection_parent_map(fault_features):
     return merged
 
 
-def subsection_parent_lookup(fault_features):
-    subsection_parent_lookup = {}
+def subsection_parent_lookup(fault_features: dict[str, Any]) -> dict[str, str]:
+    subsection_parent_lookup_table = {}
     for feature in fault_features:
-        subsection_parent_lookup[feature["properties"]["FaultID"]] = feature[
-            "properties"
-        ]["ParentID"]
+        fault_id = feature["properties"]["FaultID"]
+        parent_id = feature["properties"]["ParentID"]
+        subsection_parent_lookup_table[fault_id] = parent_id
     return subsection_parent_lookup
 
 
-def insert_ruptures(conn, indices):
+def insert_ruptures(conn: Connection, indices: dict[int, int]):
     for row in indices:
         rupture_idx, fault_idx = [int(value) for value in row.values()]
         conn.execute(
@@ -149,11 +132,18 @@ def insert_ruptures(conn, indices):
 
 
 if __name__ == "__main__":
-    with open("fault_sections.geojson", "r") as fault_file:
+    with open("fault_sections.geojson", "r", encoding="utf-8") as fault_file:
         geojson_object = json.load(fault_file)
-    with open("fast_indices.csv", "r") as csv_file_handle:
+    with open("fast_indices.csv", "r", encoding="utf-8") as csv_file_handle:
         csv_reader = csv.DictReader(csv_file_handle)
         indices = list(csv_reader)
+    with open(
+        "sub_seismo_on_fault_mfds.csv", "r", encoding="utf-8"
+    ) as mfds_file_handle:
+        csv_reader = csv.DictReader(mfds_file_handle)
+        magnitude_frequency_distribution = list(csv_reader)
     with sqlite3.connect("nshm2022.db") as conn:
+        conn.execute("PRAGMA foreign_keys = 1")
         insert_faults(conn, geojson_object["features"])
         insert_ruptures(conn, indices)
+        insert_magnitude_frequency_distribution(conn, magnitude_frequency_distribution)
