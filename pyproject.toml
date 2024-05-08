@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "nshm2022db"
+version = "0.1.0"
+description = "Fault database for the GNS National Seismic Hazard Model."
+authors = ["QuakeCoRE"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+numpy = "*"
+qcore = { git = "https://github.com/ucgmsim/qcore" }
+
+[tool.poetry.group.dev.dependencies]
+python-lsp-server = "*"
+python-lsp-black = "*"
+black = "*"
+rope = "*"
+pyflake = "*"
+mccabe = "*"
+pycodestyle = "*"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
