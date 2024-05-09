@@ -125,10 +125,7 @@ def insert_ruptures(conn: Connection, indices: dict[int, int]):
             "INSERT OR REPLACE INTO rupture (rupture_id) VALUES (?)", (rupture_idx,)
         )
 
-        conn.execute(
-            "INSERT INTO rupture_faults (rupture_id, fault_id) VALUES (?, ?)",
-            (rupture_idx, fault_idx),
-        )
+        conn.execute( "INSERT INTO rupture_faults (rupture_id, fault_id) VALUES (?, ?)", (rupture_idx, fault_idx), )
 
 
 if __name__ == "__main__":
