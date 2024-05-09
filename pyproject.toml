@@ -13,9 +13,10 @@ qcore = { git = "https://github.com/ucgmsim/qcore" }
 [tool.poetry.group.dev.dependencies]
 python-lsp-server = "*"
 python-lsp-black = "*"
+python-lsp-isort = "*"
 black = "*"
 rope = "*"
-pyflake = "*"
+pyflakes = "*"
 mccabe = "*"
 pycodestyle = "*"
 
