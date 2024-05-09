@@ -2,6 +2,8 @@
 
 This repository contains a script and schema to generate a database storing fault geometry and rupture information parsing GeoJSON information from the GNS National Seismic Hazard Model.
 
+testing branch
+
 ## Requirments 
 
 - Python 3.x
