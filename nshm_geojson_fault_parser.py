@@ -2,11 +2,15 @@
 import csv
 import json
 import sqlite3
+from pathlib import Path
 from sqlite3 import Connection
-from typing import Any
+from typing import Annotated, Any
 
 import numpy as np
 import qcore.geo
+import typer
+
+app = typer.Typer()
 
 
 def strike_between_coordinates(a: (float, float), b: (float, float)) -> float:
@@ -131,19 +135,36 @@ def insert_ruptures(conn: Connection, indices: dict[int, int]):
         )
 
 
-if __name__ == "__main__":
-    with open("fault_sections.geojson", "r", encoding="utf-8") as fault_file:
+@app.command()
+def main(
+    fault_sections_geojson_filepath: Annotated[
+        Path,
+        typer.Option(help="Fault sections geojson file", readable=True, exists=True),
+    ] = "fault_sections.geojson",
+    fast_indices_filepath: Annotated[
+        Path, typer.Option(help="Fast indices csv file", readable=True, exists=True)
+    ] = "fast_indices.csv",
+    mfds_filepath: Annotated[
+        Path, typer.Option(help="MFDS filepath", readable=True, exists=True)
+    ] = "sub_seismo_on_fault_mfds.csv",
+    sqlite_db_path: Annotated[
+        Path, typer.Option(help="Output SQLite DB path", writable=True, exists=True)
+    ] = "nshm2022.db",
+):
+    with open(fault_sections_geojson_filepath, "r", encoding="utf-8") as fault_file:
         geojson_object = json.load(fault_file)
-    with open("fast_indices.csv", "r", encoding="utf-8") as csv_file_handle:
+    with open(fast_indices_filepath, "r", encoding="utf-8") as csv_file_handle:
         csv_reader = csv.DictReader(csv_file_handle)
         indices = list(csv_reader)
-    with open(
-        "sub_seismo_on_fault_mfds.csv", "r", encoding="utf-8"
-    ) as mfds_file_handle:
+    with open(mfds_filepath, "r", encoding="utf-8") as mfds_file_handle:
         csv_reader = csv.DictReader(mfds_file_handle)
         magnitude_frequency_distribution = list(csv_reader)
-    with sqlite3.connect("nshm2022.db") as conn:
+    with sqlite3.connect(sqlite_db_path) as conn:
         conn.execute("PRAGMA foreign_keys = 1")
         insert_faults(conn, geojson_object["features"])
         insert_ruptures(conn, indices)
         insert_magnitude_frequency_distribution(conn, magnitude_frequency_distribution)
+
+
+if __name__ == "__main__":
+    app()
