@@ -141,7 +141,11 @@ def insert_magnitude_frequency_distribution(
             magnitude = float(magnitude_key)
             probability = float(probability_raw)
             conn.execute(
-                "INSERT INTO magnitude_frequency_distribution (fault_id, magnitude, probability) VALUES (?, ?, ?)",
+                """
+                INSERT INTO magnitude_frequency_distribution (
+                    fault_id, magnitude, probability
+                ) VALUES (?, ?, ?)
+                """,
                 (segment_id, magnitude, probability),
             )
 
@@ -172,7 +176,8 @@ def insert_faults(conn: Connection, fault_map: dict[str, Any]):
         parent_id = properties["ParentID"]
         parent_name = properties["ParentName"]
         conn.execute(
-            "INSERT OR REPLACE INTO parent_fault (parent_id, name) VALUES (?, ?)",
+            """INSERT OR REPLACE INTO parent_fault (parent_id, name)
+            VALUES (?, ?)""",
             (parent_id, parent_name),
         )
         conn.execute(
@@ -182,11 +187,25 @@ def insert_faults(conn: Connection, fault_map: dict[str, Any]):
         for i in range(len(leading_edge) - 1):
             left = tuple(reversed(leading_edge[i]))
             right = tuple(reversed(leading_edge[i + 1]))
-            c_lat, c_lon = centre_point(left, right, dip, dip_dir, dbottom)
+            c_lat, c_lon = centre_point_of_fault(left, right, dip, dip_dir, dbottom)
             strike = strike_between_coordinates(left, right)
             length = distance_between(left, right)
             conn.execute(
-                "INSERT INTO fault_segment (strike, rake, dip, dtop, dbottom, length, width, dip_dir, clon, clat, fault_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                """
+                INSERT INTO fault_segment (
+                    strike,
+                    rake,
+                    dip,
+                    dtop,
+                    dbottom,
+                    length,
+                    width,
+                    dip_dir,
+                    clon,
+                    clat,
+                    fault_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
                     strike,
                     rake,
@@ -213,7 +232,8 @@ def insert_ruptures(conn: Connection, indices: dict[int, int]):
     indices : dict[int, int]
         A dictionary containing rupture indices mapped to fault indices. If
         indices[0] = 1, then the fault 1 is involved in rupture 0.
-    """    for row in indices:
+    """
+    for row in indices:
         rupture_idx, fault_idx = [int(value) for value in row.values()]
         conn.execute(
             "INSERT OR REPLACE INTO rupture (rupture_id) VALUES (?)", (rupture_idx,)
