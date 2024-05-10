@@ -97,33 +97,17 @@ def insert_faults(conn: Connection, fault_map: dict[str, Any]):
             )
 
 
-def subsection_parent_map(fault_features: dict[str, Any]) -> dict[str, Any]:
-    merged = {}
-    for feature in fault_features:
-        parent_name = feature["properties"]["ParentName"]
-        if parent_name not in merged:
-            merged[parent_name] = {
-                "properties": feature["properties"],
-                "geometry": feature["geometry"]["coordinates"],
-            }
-        else:
-            merged[parent_name]["geometry"].extend(
-                feature["geometry"]["coordinates"][1:]
-            )
-    return merged
-
-
-def subsection_parent_lookup(fault_features: dict[str, Any]) -> dict[str, str]:
-    subsection_parent_lookup_table = {}
-    for feature in fault_features:
-        fault_id = feature["properties"]["FaultID"]
-        parent_id = feature["properties"]["ParentID"]
-        subsection_parent_lookup_table[fault_id] = parent_id
-    return subsection_parent_lookup
-
-
 def insert_ruptures(conn: Connection, indices: dict[int, int]):
-    for row in indices:
+    """Inserts rupture data into the database.
+
+    Parameters
+    ----------
+    conn : sqlite3.Connection
+        A connection object to the SQLite database.
+    indices : dict[int, int]
+        A dictionary containing rupture indices mapped to fault indices. If
+        indices[0] = 1, then the fault 1 is involved in rupture 0.
+    """    for row in indices:
         rupture_idx, fault_idx = [int(value) for value in row.values()]
         conn.execute(
             "INSERT OR REPLACE INTO rupture (rupture_id) VALUES (?)", (rupture_idx,)
