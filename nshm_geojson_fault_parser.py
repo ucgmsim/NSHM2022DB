@@ -13,31 +13,126 @@ import typer
 app = typer.Typer()
 
 
-def strike_between_coordinates(a: (float, float), b: (float, float)) -> float:
-    a_lat, a_lon = a
-    b_lat, b_lon = b
+def strike_between_coordinates(
+    point_a_coords: (float, float), point_b_coords: (float, float)
+) -> float:
+    """Compute the strike angle between two points given as (lat, lon) pairs.
+
+    Parameters
+    ----------
+    point_a_coords : (float, float)
+        The coordinates of the first point.
+    point_b_coords : (float, float)
+        The coordinates of the second point.
+
+    Returns
+    -------
+    float
+        The strike angle (in degrees) between point a and point b.
+
+    """
+    a_lat, a_lon = point_a_coords
+    b_lat, b_lon = point_b_coords
     return qcore.geo.ll_bearing(a_lon, a_lat, b_lon, b_lat)
 
 
-def distance_between(a: (float, float), b: (float, float)) -> float:
-    a_lat, a_lon = a
-    b_lat, b_lon = b
+def distance_between(
+    point_a_coords: (float, float), point_b_coords: (float, float)
+) -> float:
+    """Compute the distance between two points given as (lat, lon) pairs.
+
+    Parameters
+    ----------
+    point_a_coords : (float, float)
+        The coordinates of the first point.
+    point_b_coords : (float, float)
+        The coordinates of the second point.
+
+    Returns
+    -------
+    float
+        The distance (in kilometres) between point a and point b.
+
+    """
+    a_lat, a_lon = point_a_coords
+    b_lat, b_lon = point_b_coords
     return qcore.geo.ll_dist(a_lon, a_lat, b_lon, b_lat)
 
 
-def centre_point(
-    a: (float, float), b: (float, float), dip: float, dip_dir: float, width: float
+def centre_point_of_fault(
+    point_a_coords: (float, float),
+    point_b_coords: (float, float),
+    dip: float,
+    dip_dir: float,
+    width: float,
 ) -> (float, float):
-    a_lat, a_lon = a
-    b_lat, b_lon = b
+    """Find the centre point of a fault defined by two points and a dip direction.
+
+    This function calculates the centre point of a fault given the coordinates
+    of two points on the fault trace, the dip angle, dip direction, and the
+    width of the fault. The centre point is defined as the midpoint of the
+    line connecting points a and a, shifted along the dip direction by half
+    the *projected* fault width. See the diagram.
+
+       point a             point b
+           +───────────────+
+           │       │       │ │
+           │       │       │ │
+           │       │dip dir│ │
+           │       │       │ │
+           │       ∨       │ │ width
+           │       *centre │ │
+           │               │ │
+           │               │ │
+           │               │ │
+           └───────────────┘
+
+    The dip angle should be provided in degrees, with 0 degrees indicating
+    an (impossible) horizontal fault and 90 degrees indicating a vertical
+    fault. The dip direction is a bearing in degrees from north.
+
+    Parameters
+    ----------
+    a : (float, float)
+        The (lat, lon) coordinates of the point a.
+    b : (float, float)
+        The (lat, lon) coordinates of the point b.
+    dip : float
+        The dip angle of the fault.
+    dip_dir : float
+        The dip direction of the fault.
+    width : float
+        The width of the fault. Note this is the actual width, not the
+        projected width.
+
+    Returns
+    -------
+    (float, float)
+        The (lat, lon) coordinates of the (projected) centre point of
+        the fault.
+    """
+    a_lat, a_lon = point_a_coords
+    b_lat, b_lon = point_b_coords
     c_lon, c_lat = qcore.geo.ll_mid(a_lon, a_lat, b_lon, b_lat)
-    projected_width = width * np.cos(np.radians(dip)) / 2
-    return qcore.geo.ll_shift(c_lat, c_lon, projected_width, dip_dir)
+    projected_width = width * np.cos(np.radians(dip))
+    return qcore.geo.ll_shift(c_lat, c_lon, projected_width / 2, dip_dir)
 
 
 def insert_magnitude_frequency_distribution(
     conn: Connection, magnitude_frequency_distribution: list[dict[str, float | str]]
 ):
+    """Inserts magnitude-frequency distribution data into a database.
+
+    Parameters
+    ----------
+    conn : sqlite3.Connection
+        A connection object to the SQLite database.
+    magnitude_frequency_distribution : list[dict[str, Union[float, str]]]
+        A list of dictionaries containing magnitude-frequency distribution
+        data. Each dictionary should have keys 'Section Index', representing
+        the fault section index, and keys representing magnitudes associated
+        with their respective annual occurrence rate.
+    """
     for section_distribution in magnitude_frequency_distribution:
         segment_id = int(section_distribution["Section Index"])
         for magnitude_key, probability_raw in section_distribution.items():
@@ -52,6 +147,17 @@ def insert_magnitude_frequency_distribution(
 
 
 def insert_faults(conn: Connection, fault_map: dict[str, Any]):
+    """Inserts fault data into the database.
+
+    Parameters
+    ----------
+    conn : sqlite3.Connection
+        A connection object to the SQLite database.
+    fault_map : list[dict[str, Any]]
+        A list of dictionaries containing fault data. Each dictionary should
+        represent a fault feature and contain necessary properties like dip,
+        rake, depth, etc.
+    """
     for feature in fault_map:
         properties = feature["properties"]
         dip = properties["DipDeg"]
@@ -135,6 +241,7 @@ def main(
         Path, typer.Option(help="Output SQLite DB path", writable=True, exists=True)
     ] = "nshm2022.db",
 ):
+    """Generate the NSHM2022 rupture data from a CRU system solution package."""
     with open(fault_sections_geojson_filepath, "r", encoding="utf-8") as fault_file:
         geojson_object = json.load(fault_file)
     with open(fast_indices_filepath, "r", encoding="utf-8") as csv_file_handle:
@@ -144,7 +251,9 @@ def main(
         csv_reader = csv.DictReader(mfds_file_handle)
         magnitude_frequency_distribution = list(csv_reader)
     with sqlite3.connect(sqlite_db_path) as conn:
+        # To enforce foreign key constraints.
         conn.execute("PRAGMA foreign_keys = 1")
+
         insert_faults(conn, geojson_object["features"])
         insert_ruptures(conn, indices)
         insert_magnitude_frequency_distribution(conn, magnitude_frequency_distribution)
