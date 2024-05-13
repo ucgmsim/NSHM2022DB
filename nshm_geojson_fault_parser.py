@@ -135,18 +135,18 @@ def insert_magnitude_frequency_distribution(
     """
     for section_distribution in magnitude_frequency_distribution:
         segment_id = int(section_distribution["Section Index"])
-        for magnitude_key, probability_raw in section_distribution.items():
+        for magnitude_key, rate_raw in section_distribution.items():
             if magnitude_key == "Section Index":
                 continue
             magnitude = float(magnitude_key)
-            probability = float(probability_raw)
+            rate = float(rate_raw)
             conn.execute(
                 """
                 INSERT INTO magnitude_frequency_distribution (
-                    fault_id, magnitude, probability
+                    fault_id, magnitude, rate
                 ) VALUES (?, ?, ?)
                 """,
-                (segment_id, magnitude, probability),
+                (segment_id, magnitude, rate),
             )
 
 
