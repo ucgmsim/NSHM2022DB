@@ -117,8 +117,16 @@ erDiagram
         fault_id INT FK
     }
 
+    magnitude_frequency_distribution {
+        entry_id INT PK
+        fault_id INT FK
+        magnitude REAL
+        rate REAL
+    }
+
     rupture }o--o{ rupture_faults : "has many"
     fault }o--o{ rupture_faults : "belonging to many"
     fault ||--o{ fault_segment : "containing many"
     parent_fault ||--o{ fault : "are groups of"
+    fault ||--o{ magnitude_frequency_distribution : "erupts with annual rate at given magnitude"
 ```
