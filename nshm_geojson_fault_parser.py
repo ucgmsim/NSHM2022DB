@@ -13,52 +13,6 @@ import typer
 app = typer.Typer()
 
 
-def strike_between_coordinates(
-    point_a_coords: (float, float), point_b_coords: (float, float)
-) -> float:
-    """Compute the strike angle between two points given as (lat, lon) pairs.
-
-    Parameters
-    ----------
-    point_a_coords : (float, float)
-        The coordinates of the first point.
-    point_b_coords : (float, float)
-        The coordinates of the second point.
-
-    Returns
-    -------
-    float
-        The strike angle (in degrees) between point a and point b.
-
-    """
-    a_lat, a_lon = point_a_coords
-    b_lat, b_lon = point_b_coords
-    return qcore.geo.ll_bearing(a_lon, a_lat, b_lon, b_lat)
-
-
-def distance_between(
-    point_a_coords: (float, float), point_b_coords: (float, float)
-) -> float:
-    """Compute the distance between two points given as (lat, lon) pairs.
-
-    Parameters
-    ----------
-    point_a_coords : (float, float)
-        The coordinates of the first point.
-    point_b_coords : (float, float)
-        The coordinates of the second point.
-
-    Returns
-    -------
-    float
-        The distance (in kilometres) between point a and point b.
-
-    """
-    a_lat, a_lon = point_a_coords
-    b_lat, b_lon = point_b_coords
-    return qcore.geo.ll_dist(a_lon, a_lat, b_lon, b_lat)
-
-
 def centre_point_of_fault(
     point_a_coords: (float, float),
     point_b_coords: (float, float),
@@ -188,8 +142,8 @@ def insert_faults(conn: Connection, fault_map: dict[str, Any]):
             left = tuple(reversed(leading_edge[i]))
             right = tuple(reversed(leading_edge[i + 1]))
             c_lat, c_lon = centre_point_of_fault(left, right, dip, dip_dir, dbottom)
-            strike = strike_between_coordinates(left, right)
-            length = distance_between(left, right)
+            strike = qcore.geo.ll_bearing(*left[::-1], *right[::-1])
+            length = qcore.geo.ll_dist(*left[::-1], *right[::-1])
             conn.execute(
                 """
                 INSERT INTO fault_segment (
