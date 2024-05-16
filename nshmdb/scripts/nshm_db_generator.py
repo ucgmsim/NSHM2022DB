@@ -22,7 +22,7 @@ FAULT_INFORMATION_PATH = Path("ruptures") / "fault_sections.geojson"
 RUPTURE_FAULT_JOIN_PATH = Path("ruptures") / "fast_indices.csv"
 
 
-def extract_faults_from_polygons(
+def extract_faults_from_info(
     fault_info_list: FeatureCollection,
 ) -> list[Fault]:
     faults = []
