@@ -38,7 +38,7 @@ def extract_faults_from_polygons(
         bottom = fault_feature.properties["LowDepth"]
         rake = fault_feature.properties["Rake"]
 
-        segments = []
+        planes = []
         for i in range(len(fault_trace) - 1):
             top_left = fault_trace[i][::-1]
             top_right = fault_trace[i + 1][::-1]
@@ -46,8 +46,8 @@ def extract_faults_from_polygons(
             bottom_right = qcore.geo.ll_shift(*top_right, dip_dir, projected_width)
             corners = np.array([top_left, top_right, bottom_right, bottom_left])
             corners = np.append(corners, np.array([0, 0, bottom, bottom]), axis=1)
-            segments.append(nshmdb.fault.FaultSegment(corners, rake))
-        faults.append(Fault(name, None, segments))
+            planes.append(nshmdb.fault.FaultPlane(corners, rake))
+        faults.append(Fault(name, None, planes))
     return faults
 
 

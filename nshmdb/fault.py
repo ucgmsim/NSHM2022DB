@@ -1,6 +1,6 @@
-"""Module for representing fault segments and faults.
+"""Module for representing fault planes and faults.
 
-This module provides classes and functions for representing fault segments and
+This module provides classes and functions for representing fault planes and
 faults, along with methods for calculating various properties such as
 dimensions, orientation, and coordinate transformations.
 
@@ -9,11 +9,11 @@ Classes
 TectType:
     An enumeration of all the different kinds of fault types.
 
-FaultSegment:
-    A representation of a single segment of a Fault.
+FaultPlane:
+    A representation of a single plane of a Fault.
 
 Fault:
-    A representation of a fault, consisting of one or more FaultSegments.
+    A representation of a fault, consisting of one or more FaultPlanes.
 """
 
 import dataclasses
@@ -37,17 +37,17 @@ _KM_TO_M = 1000
 
 
 @dataclasses.dataclass
-class FaultSegment:
-    """A representation of a single segment of a Fault.
+class FaultPlane:
+    """A representation of a single plane of a Fault.
 
-    This class represents a single segment of a fault, providing various
+    This class represents a single plane of a fault, providing various
     properties and methods for calculating its dimensions, orientation, and
     converting coordinates between different reference frames.
 
     Attributes
     ----------
     rake : float
-        The rake angle of the fault segment.
+        The rake angle of the fault plane.
     """
 
     _corners: np.ndarray
@@ -64,7 +64,7 @@ class FaultSegment:
         Returns
         -------
         np.ndarray
-            The corners of the fault segment in (lat, lon, depth) format.
+            The corners of the fault plane in (lat, lon, depth) format.
         """
         return qcore.coordinates.nztm_to_wgs_depth(self._corners)
 
@@ -74,7 +74,7 @@ class FaultSegment:
         Returns
         -------
         float
-            The length of the fault segment (in metres).
+            The length of the fault plane (in metres).
         """
         return np.linalg.norm(self._corners[1] - self._corners[0])
 
@@ -84,7 +84,7 @@ class FaultSegment:
         Returns
         -------
         float
-            The width of the fault segment (in metres).
+            The width of the fault plane (in metres).
         """
         return np.linalg.norm(self._corners[-1] - self._corners[0])
 
@@ -104,7 +104,7 @@ class FaultSegment:
         Returns
         -------
         float
-            The width of the fault segment (in kilometres).
+            The width of the fault plane (in kilometres).
         """
         return self.width_m / _KM_TO_M
 
@@ -114,7 +114,7 @@ class FaultSegment:
         Returns
         -------
         float
-            The length of the fault segment (in kilometres).
+            The length of the fault plane (in kilometres).
         """
         return self.length_m / _KM_TO_M
 
@@ -124,7 +124,7 @@ class FaultSegment:
         Returns
         -------
         float
-            The projected width of the fault segment (in metres).
+            The projected width of the fault plane (in metres).
         """
         return self.length_m * np.cos(np.radians(self.dip))
 
@@ -134,7 +134,7 @@ class FaultSegment:
         Returns
         -------
         float
-            The projected width of the fault segment (in kilometres).
+            The projected width of the fault plane (in kilometres).
         """
         return self.projected_width / _KM_TO_M
 
@@ -191,19 +191,19 @@ class FaultSegment:
         """
         return np.degrees(np.arcsin(np.abs(self.bottom_m) / self.width_m))
 
-    def segment_coordinates_to_global_coordinates(
-        self, segment_coordinates: np.ndarray
+    def plane_coordinates_to_global_coordinates(
+        self, plane_coordinates: np.ndarray
     ) -> np.ndarray:
-        """Convert segment coordinates to nztm global coordinates.
+        """Convert plane coordinates to nztm global coordinates.
 
         Parameters
         ----------
-        segment_coordinates : np.ndarray
-            Segment coordinates to convert. Segment coordinates are
-            2D coordinates (x, y) given for a fault segment (a plane), where x
+        plane_coordinates : np.ndarray
+            Plane coordinates to convert. Plane coordinates are
+            2D coordinates (x, y) given for a fault plane (a plane), where x
             represents displacement along the length of the fault, and y
             displacement along the width of the fault (see diagram below). The
-            origin for segment coordinates is the centre of the fault.
+            origin for plane coordinates is the centre of the fault.
 
                           +x
           -1/2,-1/2 ─────────────────>
@@ -228,17 +228,17 @@ class FaultSegment:
         offset = np.array([1 / 2, 1 / 2])
 
         return qcore.coordinates.nztm_to_wgs_depth(
-            origin + (segment_coordinates + offset) @ frame
+            origin + (plane_coordinates + offset) @ frame
         )
 
-    def global_coordinates_to_segment_coordinates(
+    def global_coordinates_to_plane_coordinates(
         self,
         global_coordinates: np.ndarray,
     ) -> np.ndarray:
-        """Convert coordinates (lat, lon, depth) to segment coordinates (x, y).
+        """Convert coordinates (lat, lon, depth) to plane coordinates (x, y).
 
-        See segment_coordinates_to_global_coordinates for a description of
-        segment coordinates.
+        See plane_coordinates_to_global_coordinates for a description of
+        plane coordinates.
 
         Parameters
         ----------
@@ -248,8 +248,8 @@ class FaultSegment:
         Returns
         -------
         np.ndarray
-            The segment coordinates (x, y) representing the position of
-            global_coordinates on the fault segment.
+            The plane coordinates (x, y) representing the position of
+            global_coordinates on the fault plane.
 
         Raises
         ------
@@ -261,13 +261,13 @@ class FaultSegment:
         bottom_left = self._corners[-1]
         frame = np.vstack((top_right - origin, bottom_left - origin))
         offset = qcore.coordinates.wgs_depth_to_nztm(global_coordinates) - origin
-        segment_coordinates, residual, _, _ = np.linalg.lstsq(frame.T, offset)
+        plane_coordinates, residual, _, _ = np.linalg.lstsq(frame.T, offset)
         if not np.isclose(residual[0], 0):
             raise ValueError("Coordinates do not lie in fault plane.")
-        return segment_coordinates - np.array([1 / 2, 1 / 2])
+        return plane_coordinates - np.array([1 / 2, 1 / 2])
 
-    def global_coordinates_in_segment(self, global_coordinates: np.ndarray) -> bool:
-        """Test if some global coordinates lie in the bounds of a segment.
+    def global_coordinates_in_plane(self, global_coordinates: np.ndarray) -> bool:
+        """Test if some global coordinates lie in the bounds of a plane.
 
         Parameters
         ----------
@@ -278,21 +278,21 @@ class FaultSegment:
         -------
         bool
             True if the given global coordinates (lat, lon, depth) lie on the
-            fault segment.
+            fault plane.
         """
 
-        segment_coordinates = self.global_coordinates_to_segment_coordinates(
+        plane_coordinates = self.global_coordinates_to_plane_coordinates(
             global_coordinates
         )
         return np.all(
             np.logical_or(
-                np.abs(segment_coordinates) < 1 / 2,
-                np.isclose(np.abs(segment_coordinates), 1 / 2, atol=1e-4),
+                np.abs(plane_coordinates) < 1 / 2,
+                np.isclose(np.abs(plane_coordinates), 1 / 2, atol=1e-4),
             )
         )
 
     def centroid(self) -> np.ndarray:
-        """Returns the centre of the fault segment.
+        """Returns the centre of the fault plane.
 
         Returns
         -------
@@ -309,11 +309,11 @@ class FaultSegment:
 
 @dataclasses.dataclass
 class Fault:
-    """A representation of a fault, consisting of one or more FaultSegments.
+    """A representation of a fault, consisting of one or more FaultPlanes.
 
-    This class represents a fault, which is composed of one or more FaultSegments.
+    This class represents a fault, which is composed of one or more FaultPlanes.
     It provides methods for computing the area of the fault, getting the widths and
-    lengths of all fault segments, retrieving all corners of the fault, converting
+    lengths of all fault planes, retrieving all corners of the fault, converting
     global coordinates to fault coordinates, converting fault coordinates to global
     coordinates, generating a random hypocentre location within the fault, and
     computing the expected fault coordinates.
@@ -324,17 +324,17 @@ class Fault:
         The name of the fault.
     tect_type : str
         The type of fault this is (e.g. crustal, volcanic, subduction).
-    segments : list[FaultSegment]
-        A list containing all the FaultSegments that constitute the fault.
+    planes : list[FaultPlane]
+        A list containing all the FaultPlanes that constitute the fault.
 
     Methods
     -------
     area:
         Compute the area of a fault.
     widths:
-        Get the widths of all fault segments.
+        Get the widths of all fault planes.
     lengths:
-        Get the lengths of all fault segments.
+        Get the lengths of all fault planes.
     corners:
         Get all corners of a fault.
     global_coordinates_to_fault_coordinates:
@@ -345,7 +345,7 @@ class Fault:
 
     name: str
     tect_type: str
-    segments: list[FaultSegment]
+    planes: list[FaultPlane]
 
     def area(self) -> float:
         """Compute the area of a fault.
@@ -355,27 +355,27 @@ class Fault:
         float
             The area of the fault.
         """
-        return sum(segment.width * segment.length for segment in self.segments)
+        return sum(plane.width * plane.length for plane in self.planes)
 
     def widths(self) -> np.ndarray:
-        """Get the widths of all fault segments.
+        """Get the widths of all fault planes.
 
         Returns
         -------
         np.ndarray of shape (1 x n)
-            The widths of all fault segments contained in this fault.
+            The widths of all fault planes contained in this fault.
         """
-        return np.array([seg.width for seg in self.segments])
+        return np.array([seg.width for seg in self.planes])
 
     def lengths(self) -> np.ndarray:
-        """Get the lengths of all fault segments.
+        """Get the lengths of all fault planes.
 
         Returns
         -------
         np.ndarray of shape (1 x n)
-            The lengths of all fault segments contained in this fault.
+            The lengths of all fault planes contained in this fault.
         """
-        return np.array([seg.length for seg in self.segments])
+        return np.array([seg.length for seg in self.planes])
 
     def corners(self) -> np.ndarray:
         """Get all corners of a fault.
@@ -383,9 +383,9 @@ class Fault:
         Returns
         -------
         np.ndarray of shape (4n x 3)
-            The corners of each fault segment in the fault, stacked vertically.
+            The corners of each fault plane in the fault, stacked vertically.
         """
-        return np.vstack([segment.corners() for segment in self.segments])
+        return np.vstack([plane.corners for plane in self.planes])
 
     def global_coordinates_to_fault_coordinates(
         self, global_coordinates: np.ndarray
@@ -427,20 +427,20 @@ class Fault:
 
         running_length = 0.0
         midpoint = np.sum(self.lengths()) / 2
-        for segment in self.segments:
-            if segment.global_coordinates_in_segment(global_coordinates):
-                segment_coordinates = segment.global_coordinates_to_segment_coordinates(
+        for plane in self.planes:
+            if plane.global_coordinates_in_plane(global_coordinates):
+                plane_coordinates = plane.global_coordinates_to_plane_coordinates(
                     global_coordinates
                 )
-                strike_length = segment_coordinates[0] + 1 / 2
-                dip_length = segment_coordinates[1] + 1 / 2
+                strike_length = plane_coordinates[0] + 1 / 2
+                dip_length = plane_coordinates[1] + 1 / 2
                 return np.array(
                     [
-                        running_length + strike_length * segment.length - midpoint,
-                        max(dip_length * segment.width, 0),
+                        running_length + strike_length * plane.length - midpoint,
+                        max(dip_length * plane.width, 0),
                     ]
                 )
-            running_length += segment.length
+            running_length += plane.length
         raise ValueError("Specified coordinates not contained on fault.")
 
     def fault_coordinates_to_wgsdepth_coordinates(
@@ -468,16 +468,16 @@ class Fault:
         """
         midpoint = np.sum(self.lengths()) / 2
         remaining_length = fault_coordinates[0] + midpoint
-        for segment in self.segments:
-            segment_length = segment.length
-            if remaining_length < segment_length:
-                return segment.segment_coordinates_to_global_coordinates(
+        for plane in self.planes:
+            plane_length = plane.length
+            if remaining_length < plane_length:
+                return plane.plane_coordinates_to_global_coordinates(
                     np.array(
                         [
-                            remaining_length / segment_length - 1 / 2,
-                            fault_coordinates[1] / segment.width - 1 / 2,
+                            remaining_length / plane_length - 1 / 2,
+                            fault_coordinates[1] / plane.width - 1 / 2,
                         ]
                     ),
                 )
-            remaining_length -= segment_length
+            remaining_length -= plane_length
         raise ValueError("Specified fault coordinates out of bounds.")
