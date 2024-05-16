@@ -9,6 +9,8 @@ readme = "README.md"
 python = "^3.12"
 qcore = { git = "https://github.com/ucgmsim/qcore" }
 numpy = "^1.26.4"
+geojson = "^3.1.0"
+pandas = "^2.2.2"
 
 [tool.poetry.group.dev.dependencies]
 python-lsp-server = "*"
