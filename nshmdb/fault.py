@@ -322,7 +322,7 @@ class Fault:
     ----------
     name : str
         The name of the fault.
-    tect_type : str
+    tect_type : TectType | None
         The type of fault this is (e.g. crustal, volcanic, subduction).
     planes : list[FaultPlane]
         A list containing all the FaultPlanes that constitute the fault.
@@ -344,7 +344,7 @@ class Fault:
     """
 
     name: str
-    tect_type: str
+    tect_type: TectType | None
     planes: list[FaultPlane]
 
     def area(self) -> float:
