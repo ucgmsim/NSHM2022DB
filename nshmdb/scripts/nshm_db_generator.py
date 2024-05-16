@@ -85,6 +85,9 @@ def main(
             str(RUPTURE_FAULT_JOIN_PATH)
         ) as rupture_fault_join_handle:
             rupture_fault_join_df = pd.read_csv(rupture_fault_join_handle)
+            # The fast_indices.csv file has two columns, rupture and section.
+            # Both are ids but the section id is a float for some reason, so we
+            # need to cast to an integer.
             rupture_fault_join_df["section"] = rupture_fault_join_df["section"].astype(
                 "Int64"
             )
