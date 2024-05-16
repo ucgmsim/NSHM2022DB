@@ -9,6 +9,23 @@ This repository contains a script and schema to generate a database storing faul
 - qcore
 - sqlite3
 
+## Setting up development environment
+
+Use [Poetry](https://python-poetry.org/) to setup and manage the virtual enviroment. From within the repo run 
+
+```bash
+$ poetry lock && poetry install
+```
+
+This will install all the dependencies required for development. To start a virtual environment run
+
+```bash
+$ poetry shell
+```
+
+To integrate with PyCharm (if you use it) see [PyCharm's Documentation](https://www.jetbrains.com/help/pycharm/poetry.html#poetry-pyproject)
+
+
 ## Generate your own database
 1. Obtain the CRU fault system solution (ask a member of the software team for this file). It should be a zip file with the following structure
 ```
@@ -100,8 +117,16 @@ erDiagram
         fault_id INT FK
     }
 
+    magnitude_frequency_distribution {
+        entry_id INT PK
+        fault_id INT FK
+        magnitude REAL
+        rate REAL
+    }
+
     rupture }o--o{ rupture_faults : "has many"
     fault }o--o{ rupture_faults : "belonging to many"
     fault ||--o{ fault_segment : "containing many"
     parent_fault ||--o{ fault : "are groups of"
+    fault ||--o{ magnitude_frequency_distribution : "erupts with annual rate at given magnitude"
 ```

@@ -2,52 +2,120 @@
 import csv
 import json
 import sqlite3
+from pathlib import Path
 from sqlite3 import Connection
-from typing import Any
+from typing import Annotated, Any
 
 import numpy as np
 import qcore.geo
+import typer
+
+app = typer.Typer()
 
 
-def strike_between_coordinates(a: (float, float), b: (float, float)) -> float:
-    a_lat, a_lon = a
-    b_lat, b_lon = b
-    return qcore.geo.ll_bearing(a_lon, a_lat, b_lon, b_lat)
-
-
-def distance_between(a: (float, float), b: (float, float)) -> float:
-    a_lat, a_lon = a
-    b_lat, b_lon = b
-    return qcore.geo.ll_dist(a_lon, a_lat, b_lon, b_lat)
-
-
-def centre_point(
-    a: (float, float), b: (float, float), dip: float, dip_dir: float, width: float
+def centre_point_of_fault(
+    point_a_coords: (float, float),
+    point_b_coords: (float, float),
+    dip: float,
+    dip_dir: float,
+    width: float,
 ) -> (float, float):
-    a_lat, a_lon = a
-    b_lat, b_lon = b
+    """Find the centre point of a fault defined by two points and a dip direction.
+
+    This function calculates the centre point of a fault given the coordinates
+    of two points on the fault trace, the dip angle, dip direction, and the
+    width of the fault. The centre point is defined as the midpoint of the
+    line connecting points a and a, shifted along the dip direction by half
+    the *projected* fault width. See the diagram.
+
+       point a             point b
+           +───────────────+
+           │       │       │ │
+           │       │       │ │
+           │       │dip dir│ │
+           │       │       │ │
+           │       ∨       │ │ width
+           │       *centre │ │
+           │               │ │
+           │               │ │
+           │               │ │
+           └───────────────┘
+
+    The dip angle should be provided in degrees, with 0 degrees indicating
+    an (impossible) horizontal fault and 90 degrees indicating a vertical
+    fault. The dip direction is a bearing in degrees from north.
+
+    Parameters
+    ----------
+    a : (float, float)
+        The (lat, lon) coordinates of the point a.
+    b : (float, float)
+        The (lat, lon) coordinates of the point b.
+    dip : float
+        The dip angle of the fault.
+    dip_dir : float
+        The dip direction of the fault.
+    width : float
+        The width of the fault. Note this is the actual width, not the
+        projected width.
+
+    Returns
+    -------
+    (float, float)
+        The (lat, lon) coordinates of the (projected) centre point of
+        the fault.
+    """
+    a_lat, a_lon = point_a_coords
+    b_lat, b_lon = point_b_coords
     c_lon, c_lat = qcore.geo.ll_mid(a_lon, a_lat, b_lon, b_lat)
-    projected_width = width * np.cos(np.radians(dip)) / 2
-    return qcore.geo.ll_shift(c_lat, c_lon, projected_width, dip_dir)
+    projected_width = width * np.cos(np.radians(dip))
+    return qcore.geo.ll_shift(c_lat, c_lon, projected_width / 2, dip_dir)
 
 
 def insert_magnitude_frequency_distribution(
     conn: Connection, magnitude_frequency_distribution: list[dict[str, float | str]]
 ):
+    """Inserts magnitude-frequency distribution data into a database.
+
+    Parameters
+    ----------
+    conn : sqlite3.Connection
+        A connection object to the SQLite database.
+    magnitude_frequency_distribution : list[dict[str, Union[float, str]]]
+        A list of dictionaries containing magnitude-frequency distribution
+        data. Each dictionary should have keys 'Section Index', representing
+        the fault section index, and keys representing magnitudes associated
+        with their respective annual occurrence rate.
+    """
     for section_distribution in magnitude_frequency_distribution:
         segment_id = int(section_distribution["Section Index"])
-        for magnitude_key, probability_raw in section_distribution.items():
+        for magnitude_key, rate_raw in section_distribution.items():
             if magnitude_key == "Section Index":
                 continue
             magnitude = float(magnitude_key)
-            probability = float(probability_raw)
+            rate = float(rate_raw)
             conn.execute(
-                "INSERT INTO magnitude_frequency_distribution (fault_id, magnitude, probability) VALUES (?, ?, ?)",
-                (segment_id, magnitude, probability),
+                """
+                INSERT INTO magnitude_frequency_distribution (
+                    fault_id, magnitude, rate
+                ) VALUES (?, ?, ?)
+                """,
+                (segment_id, magnitude, rate),
             )
 
 
 def insert_faults(conn: Connection, fault_map: dict[str, Any]):
+    """Inserts fault data into the database.
+
+    Parameters
+    ----------
+    conn : sqlite3.Connection
+        A connection object to the SQLite database.
+    fault_map : list[dict[str, Any]]
+        A list of dictionaries containing fault data. Each dictionary should
+        represent a fault feature and contain necessary properties like dip,
+        rake, depth, etc.
+    """
     for feature in fault_map:
         properties = feature["properties"]
         dip = properties["DipDeg"]
@@ -62,7 +130,8 @@ def insert_faults(conn: Connection, fault_map: dict[str, Any]):
         parent_id = properties["ParentID"]
         parent_name = properties["ParentName"]
         conn.execute(
-            "INSERT OR REPLACE INTO parent_fault (parent_id, name) VALUES (?, ?)",
+            """INSERT OR REPLACE INTO parent_fault (parent_id, name)
+            VALUES (?, ?)""",
             (parent_id, parent_name),
         )
         conn.execute(
@@ -72,11 +141,25 @@ def insert_faults(conn: Connection, fault_map: dict[str, Any]):
         for i in range(len(leading_edge) - 1):
             left = tuple(reversed(leading_edge[i]))
             right = tuple(reversed(leading_edge[i + 1]))
-            c_lat, c_lon = centre_point(left, right, dip, dip_dir, dbottom)
-            strike = strike_between_coordinates(left, right)
-            length = distance_between(left, right)
+            c_lat, c_lon = centre_point_of_fault(left, right, dip, dip_dir, dbottom)
+            strike = qcore.geo.ll_bearing(*left[::-1], *right[::-1])
+            length = qcore.geo.ll_dist(*left[::-1], *right[::-1])
             conn.execute(
-                "INSERT INTO fault_segment (strike, rake, dip, dtop, dbottom, length, width, dip_dir, clon, clat, fault_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                """
+                INSERT INTO fault_segment (
+                    strike,
+                    rake,
+                    dip,
+                    dtop,
+                    dbottom,
+                    length,
+                    width,
+                    dip_dir,
+                    clon,
+                    clat,
+                    fault_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
                     strike,
                     rake,
@@ -93,32 +176,17 @@ def insert_faults(conn: Connection, fault_map: dict[str, Any]):
             )
 
 
-def subsection_parent_map(fault_features: dict[str, Any]) -> dict[str, Any]:
-    merged = {}
-    for feature in fault_features:
-        parent_name = feature["properties"]["ParentName"]
-        if parent_name not in merged:
-            merged[parent_name] = {
-                "properties": feature["properties"],
-                "geometry": feature["geometry"]["coordinates"],
-            }
-        else:
-            merged[parent_name]["geometry"].extend(
-                feature["geometry"]["coordinates"][1:]
-            )
-    return merged
-
-
-def subsection_parent_lookup(fault_features: dict[str, Any]) -> dict[str, str]:
-    subsection_parent_lookup_table = {}
-    for feature in fault_features:
-        fault_id = feature["properties"]["FaultID"]
-        parent_id = feature["properties"]["ParentID"]
-        subsection_parent_lookup_table[fault_id] = parent_id
-    return subsection_parent_lookup
-
-
 def insert_ruptures(conn: Connection, indices: dict[int, int]):
+    """Inserts rupture data into the database.
+
+    Parameters
+    ----------
+    conn : sqlite3.Connection
+        A connection object to the SQLite database.
+    indices : dict[int, int]
+        A dictionary containing rupture indices mapped to fault indices. If
+        indices[0] = 1, then the fault 1 is involved in rupture 0.
+    """
     for row in indices:
         rupture_idx, fault_idx = [int(value) for value in row.values()]
         conn.execute(
@@ -131,19 +199,39 @@ def insert_ruptures(conn: Connection, indices: dict[int, int]):
         )
 
 
-if __name__ == "__main__":
-    with open("fault_sections.geojson", "r", encoding="utf-8") as fault_file:
+@app.command()
+def main(
+    fault_sections_geojson_filepath: Annotated[
+        Path,
+        typer.Option(help="Fault sections geojson file", readable=True, exists=True),
+    ] = "fault_sections.geojson",
+    fast_indices_filepath: Annotated[
+        Path, typer.Option(help="Fast indices csv file", readable=True, exists=True)
+    ] = "fast_indices.csv",
+    mfds_filepath: Annotated[
+        Path, typer.Option(help="MFDS filepath", readable=True, exists=True)
+    ] = "sub_seismo_on_fault_mfds.csv",
+    sqlite_db_path: Annotated[
+        Path, typer.Option(help="Output SQLite DB path", writable=True, exists=True)
+    ] = "nshm2022.db",
+):
+    """Generate the NSHM2022 rupture data from a CRU system solution package."""
+    with open(fault_sections_geojson_filepath, "r", encoding="utf-8") as fault_file:
         geojson_object = json.load(fault_file)
-    with open("fast_indices.csv", "r", encoding="utf-8") as csv_file_handle:
+    with open(fast_indices_filepath, "r", encoding="utf-8") as csv_file_handle:
         csv_reader = csv.DictReader(csv_file_handle)
         indices = list(csv_reader)
-    with open(
-        "sub_seismo_on_fault_mfds.csv", "r", encoding="utf-8"
-    ) as mfds_file_handle:
+    with open(mfds_filepath, "r", encoding="utf-8") as mfds_file_handle:
         csv_reader = csv.DictReader(mfds_file_handle)
         magnitude_frequency_distribution = list(csv_reader)
-    with sqlite3.connect("nshm2022.db") as conn:
+    with sqlite3.connect(sqlite_db_path) as conn:
+        # To enforce foreign key constraints.
         conn.execute("PRAGMA foreign_keys = 1")
+
         insert_faults(conn, geojson_object["features"])
         insert_ruptures(conn, indices)
         insert_magnitude_frequency_distribution(conn, magnitude_frequency_distribution)
+
+
+if __name__ == "__main__":
+    app()

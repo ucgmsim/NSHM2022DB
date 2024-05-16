@@ -9,6 +9,7 @@ readme = "README.md"
 python = "^3.12"
 numpy = "*"
 qcore = { git = "https://github.com/ucgmsim/qcore" }
+typer = "*"
 
 [tool.poetry.group.dev.dependencies]
 python-lsp-server = "*"
@@ -19,6 +20,7 @@ rope = "*"
 pyflakes = "*"
 mccabe = "*"
 pycodestyle = "*"
+doq = "*"
 
 
 [build-system]
