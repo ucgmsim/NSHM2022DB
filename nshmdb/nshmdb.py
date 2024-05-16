@@ -53,6 +53,22 @@ class NSHMDB:
         """
         return sqlite3.connect(self.db_filepath)
 
+    def insert_parent(self, parent_id: int, parent_name: str):
+        """Insert parent fault data into the database.
+
+        Parameters
+        ----------
+        parent_id : int
+            ID of the parent fault.
+        name : str
+            Name of the parent fault.
+        """
+        with self.connection() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO parent_fault (parent_id, name) VALUES (?, ?)""",
+                (parent_id, parent_name),
+            )
+
     def insert_fault(self, fault_id: int, parent_id: int, fault: Fault):
         """Insert fault data into the database.
 
