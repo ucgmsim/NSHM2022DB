@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-import csv
 import functools
-import sqlite3
 import zipfile
 from pathlib import Path
 from typing import Annotated
