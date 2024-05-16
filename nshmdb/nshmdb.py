@@ -22,13 +22,14 @@ in the database.
 """
 
 import dataclasses
+import importlib.resources
 import sqlite3
 from pathlib import Path
 from sqlite3 import Connection
 
 import numpy as np
 
-import nshmdb.fault
+from nshmdb import fault
 from nshmdb.fault import Fault
 
 
@@ -43,6 +44,14 @@ class NSHMDB:
     """
 
     db_filepath: Path
+
+    def create(self):
+        schema_traversable = importlib.resources.files("nshmdb.schema") / "schema.sql"
+        with importlib.resources.as_file(schema_traversable) as schema_path:
+            with open(schema_path, "r", encoding="utf-8") as schema_file_handle:
+                schema = schema_file_handle.read()
+        with self.connection() as conn:
+            conn.executescript(schema)
 
     def connection(self) -> Connection:
         """Establish a connection to the SQLite database.
