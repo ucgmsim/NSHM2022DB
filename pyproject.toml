@@ -20,6 +20,8 @@ pyflakes = "*"
 mccabe = "*"
 pycodestyle = "*"
 doq = "*"
+mypy = "^1.10.0"
+pylsp-mypy = "^0.6.8"
 
 [build-system]
 requires = ["poetry-core"]
@@ -27,3 +29,9 @@ build-backend = "poetry.core.masonry.api"
 
 [scripts]
 nshm-db-generator = "nshmdb.scripts.nshm_db_generator:app"
+
+[tool.pylsp-mypy]
+enabled = true
+live_mode = true
+strict = false
+exclude = ["tests/*"]
