@@ -191,5 +191,5 @@ class NSHMDB:
                         [bottom_left_lat, bottom_right_lon, bottom],
                     ]
                 )
-                faults[-1].segments.append(nshmdb.fault.FaultSegment(corners, rake))
+                faults[-1].segments.append(fault.FaultSegment(corners, rake))
             return faults
