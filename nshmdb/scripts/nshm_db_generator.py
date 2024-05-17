@@ -81,26 +81,28 @@ def main(
 
         faults = extract_faults_from_info(faults_info)
 
-        with cru_solutions_zip_file.open(
-            str(RUPTURE_FAULT_JOIN_PATH)
-        ) as rupture_fault_join_handle:
-            rupture_fault_join_df = pd.read_csv(rupture_fault_join_handle)
-            # The fast_indices.csv file has two columns, rupture and section.
-            # Both are ids but the section id is a float for some reason, so we
-            # need to cast to an integer.
-            rupture_fault_join_df["section"] = rupture_fault_join_df["section"].astype(
-                "Int64"
-            )
-
-    for i, fault in enumerate(faults):
-        fault_info = faults_info[i]
-        parent_id = fault_info.proprties["ParentID"]
-        db.insert_parent(parent_id, fault_info.properties["ParentName"])
-        db.insert_fault(fault_info.properties["FaultID"], parent_id, fault)
-
-    rupture_fault_join_df.groupby("rupture").apply(
-        functools.partial(insert_rupture, db=db)
-    )
+        if not skip_faults_insertion:
+            for i, fault in enumerate(faults):
+                fault_info = faults_info[i]
+                parent_id = fault_info.properties["ParentID"]
+                db.insert_parent(conn, parent_id, fault_info.properties["ParentName"])
+                db.insert_fault(
+                    conn, fault_info.properties["FaultID"], parent_id, fault
+                )
+        if not skip_rupture_creation:
+            with cru_solutions_zip_file.open(
+                str(RUPTURE_FAULT_JOIN_PATH)
+            ) as rupture_fault_join_handle:
+                rupture_fault_join_df = pd.read_csv(rupture_fault_join_handle)
+                rupture_fault_join_df["section"] = rupture_fault_join_df[
+                    "section"
+                ].astype("Int64")
+                for _, row in tqdm.tqdm(
+                    rupture_fault_join_df.iterrows(),
+                    desc="Binding ruptures to faults",
+                    total=len(rupture_fault_join_df),
+                ):
+                    db.add_fault_to_rupture(conn, row["rupture"], row["section"])
 
 
 if __name__ == "__main__":
