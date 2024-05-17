@@ -11,8 +11,8 @@ CREATE TABLE IF NOT EXISTS parent_fault (
     name TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS fault_segment (
-    segment_id INTEGER PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS fault_plane (
+    plane_id INTEGER PRIMARY KEY,
     top_left_lat REAL NOT NULL,
     top_left_lon REAL NOT NULL,
     top_right_lat REAL NOT NULL,
