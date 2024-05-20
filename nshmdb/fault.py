@@ -151,13 +151,8 @@ class FaultPlane:
         north_direction = np.array([1, 0, 0])
         up_direction = np.array([0, 0, 1])
         strike_direction = self._corners[1] - self._corners[0]
-        return (
-            np.degrees(
-                qcore.geo.oriented_angle_wrt_normal(
-                    north_direction, strike_direction, up_direction
-                )
-            )
-            % 360
+        return qcore.geo.oriented_bearing_wrt_normal(
+            north_direction, strike_direction, up_direction
         )
 
     @property
@@ -172,13 +167,8 @@ class FaultPlane:
         up_direction = np.array([0, 0, 1])
         dip_direction = self._corners[-1] - self._corners[0]
         dip_direction[-1] = 0
-        return (
-            np.degrees(
-                qcore.geo.oriented_angle_wrt_normal(
-                    north_direction, dip_direction, up_direction
-                )
-            )
-            % 360
+        return qcore.geo.oriented_bearing_wrt_normal(
+            north_direction, dip_direction, up_direction
         )
 
     @property
