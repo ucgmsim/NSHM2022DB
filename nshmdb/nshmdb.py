@@ -46,6 +46,7 @@ class NSHMDB:
     db_filepath: Path
 
     def create(self):
+        """Create the tables for the NSHMDB database."""
         schema_traversable = importlib.resources.files("nshmdb.schema") / "schema.sql"
         with importlib.resources.as_file(schema_traversable) as schema_path:
             with open(schema_path, "r", encoding="utf-8") as schema_file_handle:
