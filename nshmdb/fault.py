@@ -251,10 +251,10 @@ class FaultPlane:
         bottom_left = self._corners[-1]
         frame = np.vstack((top_right - origin, bottom_left - origin))
         offset = qcore.coordinates.wgs_depth_to_nztm(global_coordinates) - origin
-        plane_coordinates, residual, _, _ = np.linalg.lstsq(frame.T, offset)
-        if not np.isclose(residual[0], 0):
+        plane_coordinates, residual, _, _ = np.linalg.lstsq(frame.T, offset, rcond=None)
+        if not np.isclose(residual[0], 0, atol=1e-02):
             raise ValueError("Coordinates do not lie in fault plane.")
-        return plane_coordinates - np.array([1 / 2, 1 / 2])
+        return np.clip(plane_coordinates - np.array([1 / 2, 1 / 2]), -1 / 2, 1 / 2)
 
     def global_coordinates_in_plane(self, global_coordinates: np.ndarray) -> bool:
         """Test if some global coordinates lie in the bounds of a plane.
@@ -271,15 +271,18 @@ class FaultPlane:
             fault plane.
         """
 
-        plane_coordinates = self.global_coordinates_to_plane_coordinates(
-            global_coordinates
-        )
-        return np.all(
-            np.logical_or(
-                np.abs(plane_coordinates) < 1 / 2,
-                np.isclose(np.abs(plane_coordinates), 1 / 2, atol=1e-4),
+        try:
+            plane_coordinates = self.global_coordinates_to_plane_coordinates(
+                global_coordinates
             )
-        )
+            return np.all(
+                np.logical_or(
+                    np.abs(plane_coordinates) < 1 / 2,
+                    np.isclose(np.abs(plane_coordinates), 1 / 2, atol=1e-3),
+                )
+            )
+        except ValueError:
+            return False
 
     def centroid(self) -> np.ndarray:
         """Returns the centre of the fault plane.
