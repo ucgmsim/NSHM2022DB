@@ -45,6 +45,23 @@ class NSHMDB:
 
     db_filepath: Path
 
+    def __init__(self, db_filepath: Path):
+        """Create a NSHMDB object
+
+        Parameters
+        ----------
+        db_filepath : Path
+            The path to the nshm database.
+
+        Raises
+        ------
+        ValueError
+            If the database at db_filepath does not exist.
+        """
+        if not db_filepath.exists():
+            raise ValueError(f"DB filepath {str(db_filepath)} does not exist.")
+        self.db_filepath = db_filepath
+
     def create(self):
         """Create the tables for the NSHMDB database."""
         schema_traversable = importlib.resources.files("nshmdb.schema") / "schema.sql"
