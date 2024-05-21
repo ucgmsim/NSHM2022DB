@@ -53,10 +53,6 @@ class FaultPlane:
     _corners: np.ndarray
     rake: float
 
-    def __init__(self, corners: np.ndarray, rake: float):
-        self._corners = qcore.coordinates.wgs_depth_to_nztm(corners)
-        self.rake = rake
-
     @property
     def corners(self) -> np.ndarray:
         """
@@ -163,6 +159,8 @@ class FaultPlane:
         float
             The bearing of the dip direction (from north; in degrees).
         """
+        if np.isclose(self.dip, 90):
+            return 0  # TODO: Is this right for this case?
         north_direction = np.array([1, 0, 0])
         up_direction = np.array([0, 0, 1])
         dip_direction = self._corners[-1] - self._corners[0]

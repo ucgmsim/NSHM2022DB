@@ -28,6 +28,7 @@ from pathlib import Path
 from sqlite3 import Connection
 
 import numpy as np
+import qcore.coordinates
 
 from nshmdb import fault
 from nshmdb.fault import Fault
@@ -44,23 +45,6 @@ class NSHMDB:
     """
 
     db_filepath: Path
-
-    def __init__(self, db_filepath: Path):
-        """Create a NSHMDB object
-
-        Parameters
-        ----------
-        db_filepath : Path
-            The path to the nshm database.
-
-        Raises
-        ------
-        ValueError
-            If the database at db_filepath does not exist.
-        """
-        if not db_filepath.exists():
-            raise ValueError(f"DB filepath {str(db_filepath)} does not exist.")
-        self.db_filepath = db_filepath
 
     def create(self):
         """Create the tables for the NSHMDB database."""
@@ -210,7 +194,9 @@ class NSHMDB:
                         [bottom_left_lat, bottom_left_lon, bottom],
                     ]
                 )
-                planes.append(fault.FaultPlane(corners, rake))
+                planes.append(
+                    fault.FaultPlane(qcore.coordinates.wgs_depth_to_nztm(corners), rake)
+                )
             cursor.execute("SELECT * from fault where fault_id = ?", (fault_id,))
             fault_id, name, _, _ = cursor.fetchone()
             return Fault(name, None, planes)
@@ -275,5 +261,7 @@ class NSHMDB:
                         [bottom_left_lat, bottom_left_lon, bottom],
                     ]
                 )
-                faults[-1].planes.append(fault.FaultPlane(corners, rake))
+                faults[-1].planes.append(
+                    fault.FaultPlane(qcore.coordinates.wgs_depth_to_nztm(corners), rake)
+                )
             return faults

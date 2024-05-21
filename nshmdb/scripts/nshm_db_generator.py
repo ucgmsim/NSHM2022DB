@@ -26,17 +26,16 @@ import zipfile
 from pathlib import Path
 from typing import Annotated
 
-from nshmdb.fault import Fault
-from nshmdb.nshmdb import NSHMDB
-
 import geojson
 import nshmdb.fault
 import numpy as np
 import pandas as pd
-import qcore.geo
+import qcore.coordinates
 import tqdm
 import typer
 from geojson import FeatureCollection
+from nshmdb.fault import Fault
+from nshmdb.nshmdb import NSHMDB
 
 app = typer.Typer()
 
@@ -76,16 +75,25 @@ def extract_faults_from_info(
         rake = fault_feature.properties["Rake"]
         planes = []
         for i in range(len(fault_trace) - 1):
-            top_left = fault_trace[i][::-1]
-            top_right = fault_trace[i + 1][::-1]
-            bottom_left = qcore.geo.ll_shift(*top_left, projected_width, dip_dir)
-            bottom_right = qcore.geo.ll_shift(*top_right, projected_width, dip_dir)
-            corners = np.array([top_left, top_right, bottom_right, bottom_left])
-            corners = np.append(
-                corners,
-                np.array([0, 0, bottom * 1000, bottom * 1000]).reshape((-1, 1)),
-                axis=1,
+            top_left = qcore.coordinates.wgs_depth_to_nztm(
+                np.append(fault_trace[i][::-1], 0)
             )
+            top_right = qcore.coordinates.wgs_depth_to_nztm(
+                np.append(fault_trace[i + 1][::-1], 0)
+            )
+            dip_dir_direction = (
+                np.array(
+                    [
+                        projected_width * np.cos(np.radians(dip_dir)),
+                        projected_width * np.sin(np.radians(dip_dir)),
+                        bottom,
+                    ]
+                )
+                * 1000
+            )
+            bottom_left = top_left + dip_dir_direction
+            bottom_right = top_right + dip_dir_direction
+            corners = np.array([top_left, top_right, bottom_right, bottom_left])
             planes.append(nshmdb.fault.FaultPlane(corners, rake))
         faults.append(Fault(name, None, planes))
     return faults
