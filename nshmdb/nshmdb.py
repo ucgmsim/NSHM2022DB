@@ -151,7 +151,20 @@ class NSHMDB:
             (rupture_id, fault_id),
         )
 
-    def get_fault(self, fault_id) -> Fault:
+    def get_fault(self, fault_id: int) -> Fault:
+        """Get a specific fault definition from a database.
+
+        Parameters
+        ----------
+        fault_id : int
+            The id of the fault to retreive.
+
+        Returns
+        -------
+        Fault
+            The fault geometry.
+        """
+
         with self.connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * from fault_plane where fault_id = ?", (fault_id,))
