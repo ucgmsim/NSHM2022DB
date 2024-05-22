@@ -461,7 +461,9 @@ class Fault:
         remaining_length = fault_coordinates[0] + midpoint
         for plane in self.planes:
             plane_length = plane.length
-            if remaining_length < plane_length:
+            if remaining_length < plane_length or np.isclose(
+                remaining_length, plane_length
+            ):
                 return plane.plane_coordinates_to_global_coordinates(
                     np.array(
                         [
