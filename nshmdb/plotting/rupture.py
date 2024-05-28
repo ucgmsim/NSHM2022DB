@@ -7,12 +7,14 @@ Functions:
     plot_rupture: Plot ruptures on faults.
 """
 
+from pathlib import Path
+
 import numpy as np
 from nshmdb.fault import Fault
 from pygmt_helper import plotting
 
 
-def plot_rupture(title: str, faults: list[Fault]):
+def plot_rupture(title: str, faults: list[Fault], output_filepath: Path):
     """Plot faults involved in a rupture scenario using pygmt.
 
     Parameters
@@ -21,6 +23,8 @@ def plot_rupture(title: str, faults: list[Fault]):
         The title of the figure.
     faults : list[Fault]
         The list of faults involved in the rupture.
+    output_filepath : Path
+        The filepath to output the figure to.
     """
     corners = np.vstack([fault.corners() for fault in faults])
     region = (
@@ -41,4 +45,4 @@ def plot_rupture(title: str, faults: list[Fault]):
                 fill="red",
             )
 
-    fig.show()
+    fig.savefig(output_filepath)
