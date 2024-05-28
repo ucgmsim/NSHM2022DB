@@ -189,8 +189,8 @@ class FaultPlane:
         plane_coordinates : np.ndarray
             Plane coordinates to convert. Plane coordinates are
             2D coordinates (x, y) given for a fault plane (a plane), where x
-            represents displacement along the length of the fault, and y
-            displacement along the width of the fault (see diagram below). The
+            represents displacement along the strike, and y
+            displacement along the dip (see diagram below). The
             origin for plane coordinates is the centre of the fault.
 
                           +x
@@ -374,7 +374,8 @@ class Fault:
         Returns
         -------
         np.ndarray of shape (4n x 3)
-            The corners of each fault plane in the fault, stacked vertically.
+            The corners in (lat, lon, depth) format of each fault plane in the
+            fault, stacked vertically.
         """
         return np.vstack([plane.corners for plane in self.planes])
 
