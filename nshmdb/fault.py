@@ -132,7 +132,7 @@ class FaultPlane:
         float
             The projected width of the fault plane (in kilometres).
         """
-        return self.projected_width / _KM_TO_M
+        return self.projected_width_m / _KM_TO_M
 
     @property
     def strike(self) -> float:
