@@ -379,6 +379,16 @@ class Fault:
         """
         return np.vstack([plane.corners for plane in self.planes])
 
+    def corners_nztm(self) -> np.ndarray:
+        """Get all corners of a fault.
+
+        Returns
+        -------
+        np.ndarray of shape (4n x 3)
+            The corners in NZTM format of each fault plane in the fault, stacked vertically.
+        """
+        return np.vstack([plane.corners_nztm for plane in self.planes])
+
     def global_coordinates_to_fault_coordinates(
         self, global_coordinates: np.ndarray
     ) -> np.ndarray:
