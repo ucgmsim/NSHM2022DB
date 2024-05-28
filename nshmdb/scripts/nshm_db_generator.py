@@ -40,7 +40,6 @@ from nshmdb.nshmdb import NSHMDB
 app = typer.Typer()
 
 
-POLYGONS_PATH = Path("ruptures") / "sect_polygons.geojson"
 FAULT_INFORMATION_PATH = Path("ruptures") / "fault_sections.geojson"
 RUPTURE_FAULT_JOIN_PATH = Path("ruptures") / "fast_indices.csv"
 
