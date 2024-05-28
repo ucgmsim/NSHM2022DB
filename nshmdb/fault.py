@@ -20,8 +20,7 @@ import dataclasses
 from enum import Enum
 
 import numpy as np
-import qcore.coordinates
-import qcore.geo
+from qcore import coordinates, geo
 
 
 class TectType(Enum):
