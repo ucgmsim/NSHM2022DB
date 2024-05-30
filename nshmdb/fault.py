@@ -47,7 +47,23 @@ class FaultPlane:
     ----------
     rake : float
         The rake angle of the fault plane.
-    """
+    corners_nztm : np.ndarray
+        The corners of the fault plane, in NZTM format. The order of the
+        corners is given clockwise from the top left (according to strike
+        and dip). See the diagram below.
+                                        
+         0            1                 
+          ┌──────────┐                  
+          │          │                  
+          │          │                  
+          │          │                  
+          │          │                  
+          │          │                  
+          │          │                  
+          │          │                  
+          └──────────┘                  
+         3            2                 
+   """
 
     corners_nztm: np.ndarray
     rake: float
@@ -55,13 +71,13 @@ class FaultPlane:
     @property
     def corners(self) -> np.ndarray:
         """
-
         Returns
         -------
         np.ndarray
-            The corners of the fault plane in (lat, lon, depth) format.
+            The corners of the fault plane in (lat, lon, depth) format. The
+            corners are the same as in corners_nztm.
         """
-        return qcore.coordinates.nztm_to_wgs_depth(self.corners_nztm)
+        return coordinates.nztm_to_wgs_depth(self.corners_nztm)
 
     @property
     def length_m(self) -> float:
@@ -146,7 +162,7 @@ class FaultPlane:
         north_direction = np.array([1, 0, 0])
         up_direction = np.array([0, 0, 1])
         strike_direction = self.corners_nztm[1] - self.corners_nztm[0]
-        return qcore.geo.oriented_bearing_wrt_normal(
+        return geo.oriented_bearing_wrt_normal(
             north_direction, strike_direction, up_direction
         )
 
@@ -164,7 +180,7 @@ class FaultPlane:
         up_direction = np.array([0, 0, 1])
         dip_direction = self.corners_nztm[-1] - self.corners_nztm[0]
         dip_direction[-1] = 0
-        return qcore.geo.oriented_bearing_wrt_normal(
+        return geo.oriented_bearing_wrt_normal(
             north_direction, dip_direction, up_direction
         )
 
@@ -195,9 +211,9 @@ class FaultPlane:
                           +x
           -1/2,-1/2 ─────────────────>
                 ┌─────────────────────┐ │
-                │      < width >      │ │
+                │      < strike >     │ │
                 │                 ^   │ │
-                │               length│ │ +y
+                │                dip  │ │ +y
                 │                 v   │ │
                 │                     │ │
                 └─────────────────────┘ ∨
@@ -214,7 +230,7 @@ class FaultPlane:
         frame = np.vstack((top_right - origin, bottom_left - origin))
         offset = np.array([1 / 2, 1 / 2])
 
-        return qcore.coordinates.nztm_to_wgs_depth(
+        return coordinates.nztm_to_wgs_depth(
             origin + (plane_coordinates + offset) @ frame
         )
 
@@ -247,7 +263,7 @@ class FaultPlane:
         top_right = self.corners_nztm[1]
         bottom_left = self.corners_nztm[-1]
         frame = np.vstack((top_right - origin, bottom_left - origin))
-        offset = qcore.coordinates.wgs_depth_to_nztm(global_coordinates) - origin
+        offset = coordinates.wgs_depth_to_nztm(global_coordinates) - origin
         plane_coordinates, residual, _, _ = np.linalg.lstsq(frame.T, offset, rcond=None)
         if not np.isclose(residual[0], 0, atol=1e-02):
             raise ValueError("Coordinates do not lie in fault plane.")
@@ -292,7 +308,7 @@ class FaultPlane:
 
         """
 
-        return qcore.coordinates.nztm_to_wgs_depth(
+        return coordinates.nztm_to_wgs_depth(
             np.mean(self.corners_nztm, axis=0).reshape((1, -1))
         ).ravel()
 
