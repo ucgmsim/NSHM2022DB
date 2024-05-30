@@ -51,19 +51,19 @@ class FaultPlane:
         The corners of the fault plane, in NZTM format. The order of the
         corners is given clockwise from the top left (according to strike
         and dip). See the diagram below.
-                                        
-         0            1                 
-          ┌──────────┐                  
-          │          │                  
-          │          │                  
-          │          │                  
-          │          │                  
-          │          │                  
-          │          │                  
-          │          │                  
-          └──────────┘                  
-         3            2                 
-   """
+
+         0            1
+          ┌──────────┐
+          │          │
+          │          │
+          │          │
+          │          │
+          │          │
+          │          │
+          │          │
+          └──────────┘
+         3            2
+    """
 
     corners_nztm: np.ndarray
     rake: float
