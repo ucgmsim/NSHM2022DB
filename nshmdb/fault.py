@@ -20,6 +20,7 @@ import dataclasses
 from enum import Enum
 
 import numpy as np
+from typing import Optional
 from qcore import coordinates, geo
 
 
@@ -350,7 +351,7 @@ class Fault:
     """
 
     name: str
-    tect_type: TectType | None
+    tect_type: Optional[TectType]
     planes: list[FaultPlane]
 
     def area(self) -> float:
