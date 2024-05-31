@@ -63,70 +63,9 @@ To integrate with PyCharm (if you use it) see [PyCharm's Documentation](https://
 │   └── sub_seismo_on_fault_mfds.csv
 └── WARNING.md
 ```
-2. Copy the `fault_sections.geojson` and `fast_indices.csv` file into the directory contaning the script.
-3. For some reason (pandas shenanigans?) the `fast_indices.csv` which maps between rupture ids and fault segment ids uses ints for the ruptures and *floats* for the fault segment ids. Run the following in the command line to turn the floats into integers.
+*YOU DO NOT NEED TO EXTRACT THIS FILE ANYWHERE*
+2. After cloning this repository and installing the depedencies, run the following 
 ```bash
-$ sed -i 's/\.0//' fast_indices.csv
+python nshmdb/scripts/nshm_db_generator.py <PATH_TO_CRU_FAULT_ZIP> nshmdb.db
 ```
-4. Creating an empty `nshm2022.db` database file.
-```bash
-$ sqlite3 nshm2022.db < schema.db
-```
-5. Populate the database using the `nshm_geojson_fault_parser.py` script.
-```bash
-$ python nshm_geojson_fault_parser.py
-```
-This step will take some time.
-
-# Database Schema
-```mermaid
-erDiagram
-    fault {
-        fault_id INT PK
-        name TEXT
-        parent_id INT FK
-        tect_type INT
-    }
-
-    parent_fault {
-        parent_id INT PK
-        name TEXT
-    }
-
-    fault_segment {
-        segment_id INT PK
-        strike REAL
-        rake REAL
-        dip REAL
-        dtop REAL
-        dbottom REAL
-        length REAL
-        width REAL
-        dip_dir REAL
-        clon REAL
-        clat REAL
-    }
-
-    rupture {
-        rupture_id INT PK
-    }
-
-    rupture_faults {
-        rupture_fault_id INT PK
-        rupture_id INT FK
-        fault_id INT FK
-    }
-
-    magnitude_frequency_distribution {
-        entry_id INT PK
-        fault_id INT FK
-        magnitude REAL
-        rate REAL
-    }
-
-    rupture }o--o{ rupture_faults : "has many"
-    fault }o--o{ rupture_faults : "belonging to many"
-    fault ||--o{ fault_segment : "containing many"
-    parent_fault ||--o{ fault : "are groups of"
-    fault ||--o{ magnitude_frequency_distribution : "erupts with annual rate at given magnitude"
-```
+This will take some time. 
