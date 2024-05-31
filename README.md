@@ -64,6 +64,7 @@ To integrate with PyCharm (if you use it) see [PyCharm's Documentation](https://
 └── WARNING.md
 ```
 *YOU DO NOT NEED TO EXTRACT THIS FILE ANYWHERE*
+
 2. After cloning this repository and installing the depedencies, run the following 
 ```bash
 python nshmdb/scripts/nshm_db_generator.py <PATH_TO_CRU_FAULT_ZIP> nshmdb.db
