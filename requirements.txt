@@ -4,7 +4,7 @@ numpy
 pandas
 pygments
 pygmt
-qcore
+qcore @ git+https://github.com/ucgmsim/qcore
 scipy
 tqdm
 typer
