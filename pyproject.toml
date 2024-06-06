@@ -4,11 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nshmdb"
-authors = "QuakeCoRE"
+authors = [{name="QuakeCoRE"}]
 description = "A library for working with 2022 NSHM fault geometry"
 readme = "README.md"
 requires-python = ">=3.7"
 dynamic = ["dependencies", "version"]
 
+[project.scripts]
+nshm_db_generator = "nshmdb.scripts.nshm_db_generator:app"
+
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
+
