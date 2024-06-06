@@ -11,18 +11,19 @@ CREATE TABLE IF NOT EXISTS parent_fault (
     name TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS fault_segment (
-    segment_id INTEGER PRIMARY KEY,
-    strike REAL NOT NULL,
+CREATE TABLE IF NOT EXISTS fault_plane (
+    plane_id INTEGER PRIMARY KEY,
+    top_left_lat REAL NOT NULL,
+    top_left_lon REAL NOT NULL,
+    top_right_lat REAL NOT NULL,
+    top_right_lon REAL NOT NULL,
+    bottom_right_lat REAL NOT NULL,
+    bottom_right_lon REAL NOT NULL,
+    bottom_left_lat REAL NOT NULL,
+    bottom_left_lon REAL NOT NULL,
+    top_depth REAL NOT NULL,
+    bottom_depth REAL NOT NULL,
     rake REAL NOT NULL,
-    dip REAL NOT NULL,
-    dtop REAL NOT NULL,
-    dbottom REAL NOT NULL,
-    length REAL NOT NULL,
-    width REAL NOT NULL,
-    dip_dir REAL NOT NULL,
-    clon REAL NOT NULL,
-    clat REAL NOT NULL,
     fault_id INTEGER NOT NULL,
     FOREIGN KEY(fault_id) REFERENCES fault(fault_id)
 );

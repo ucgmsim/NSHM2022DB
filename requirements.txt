@@ -1,0 +1,10 @@
+dataclasses
+geojson
+numpy
+pandas
+pygments
+pygmt
+qcore
+scipy
+tqdm
+typer
