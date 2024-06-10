@@ -153,6 +153,31 @@ class NSHMDB:
             (rupture_id, fault_id),
         )
 
+    def add_magnitude_probability(
+        self, conn: Connection, fault_id: int, magnitude: float, rate: float
+    ):
+        """Assign a rupture frequency rate for a fault at a given magnitude.
+
+        Parameters
+        ----------
+        self :
+            self
+        conn : Connection
+            The db connection object.
+        fault_id : int
+            The fault to add a magnitude rate for.
+        magnitude : float
+            The magnitude to give a rate for.
+        rate : float
+            The rupture rate (annual).
+        """
+        conn.execute(
+            "INSERT OR REPLACE INTO "
+            "magnitude_frequency_distribution (fault_id, magnitude, rate) "
+            "VALUES (?, ?, ?)",
+            (fault_id, magnitude, rate),
+        )
+
     def get_fault(self, fault_id: int) -> Fault:
         """Get a specific fault definition from a database.
 
@@ -164,7 +189,7 @@ class NSHMDB:
         Returns
         -------
         Fault
-            The fault geometry.
+            The fault object.
         """
 
         with self.connection() as conn:
@@ -199,7 +224,12 @@ class NSHMDB:
                 )
             cursor.execute("SELECT * from fault where fault_id = ?", (fault_id,))
             fault_id, name, _, _ = cursor.fetchone()
-            return Fault(name, None, planes)
+            cursor.execute(
+                "SELECT magnitude, rate FROM magnitude_frequency_distribution WHERE fault_id = ?",
+                (fault_id,),
+            )
+            mfds = np.array(cursor.fetchall())
+            return Fault(name, None, planes, mfds)
 
     def get_rupture_faults(self, rupture_id: int) -> list[Fault]:
         """Retrieve faults involved in a rupture from the database.

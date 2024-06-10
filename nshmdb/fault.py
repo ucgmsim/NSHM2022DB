@@ -16,11 +16,14 @@ Fault:
     A representation of a fault, consisting of one or more FaultPlanes.
 """
 
+from __future__ import annotations
+
 import dataclasses
 from enum import Enum
+from typing import Optional
 
 import numpy as np
-from typing import Optional
+import scipy as sp
 from qcore import coordinates, geo
 
 
@@ -353,6 +356,7 @@ class Fault:
     name: str
     tect_type: Optional[TectType]
     planes: list[FaultPlane]
+    _magnitude_frequency_distribution: np.ndarray
 
     def area(self) -> float:
         """Compute the area of a fault.
@@ -501,3 +505,35 @@ class Fault:
                 )
             remaining_length -= plane_length
         raise ValueError("Specified fault coordinates out of bounds.")
+
+    def estimate_rupture_probability(
+        self, magnitudes: float | np.ndarray
+    ) -> float | np.ndarray:
+        """Estimate the rupture probability of the fault at a range of magnitudes.
+
+        Estimation assumes that the magnitude-frequency distribution is a typical Gutenberg-Richter MFD[1]_.
+
+        Parameters
+        ----------
+        magnitudes : float | np.ndarray
+            The magnitude(s) to estimate rupture probabilities for.
+
+        Returns
+        -------
+        float | np.ndarray
+            The probability that the fault will rupture for each given magnitude(s).
+
+        References
+        ----------
+        [1]: Baker, J., Bradley, B., & Stafford, P. (2021). Seismic hazard and risk analysis, pp. 90-91. Cambridge University Press.
+
+
+        """
+        valid_rates = self._magnitude_frequency_distribution[
+            self._magnitude_frequency_distribution[:, 1] > 0
+        ]
+        max_valid_rate = np.max(valid_rates[:, 1])
+        min_valid_rate = np.min(valid_rates[:, 0])
+
+        sp.exp
+        return np.exp(fit(magnitudes))

@@ -27,13 +27,14 @@ from pathlib import Path
 from typing import Annotated
 
 import geojson
-import nshmdb.fault
 import numpy as np
 import pandas as pd
 import qcore.coordinates
 import tqdm
 import typer
 from geojson import FeatureCollection
+
+import nshmdb.fault
 from nshmdb.fault import Fault
 from nshmdb.nshmdb import NSHMDB
 
@@ -42,6 +43,7 @@ app = typer.Typer()
 
 FAULT_INFORMATION_PATH = Path("ruptures") / "fault_sections.geojson"
 RUPTURE_FAULT_JOIN_PATH = Path("ruptures") / "fast_indices.csv"
+MAGNITUDE_FREQUENCY_DISTRBUTIONS = Path("ruptures") / "sub_seismo_on_fault_mfds.csv"
 
 
 def extract_faults_from_info(
@@ -94,7 +96,7 @@ def extract_faults_from_info(
             bottom_right = top_right + dip_dir_direction
             corners = np.array([top_left, top_right, bottom_right, bottom_left])
             planes.append(nshmdb.fault.FaultPlane(corners, rake))
-        faults.append(Fault(name, None, planes))
+        faults.append(Fault(name, None, planes, []))
     return faults
 
 
@@ -116,6 +118,10 @@ def main(
     skip_rupture_creation: Annotated[
         bool, typer.Option(help="If flag is set, skip rupture creation.")
     ] = False,
+    skip_mfds_creation: Annotated[
+        bool,
+        typer.Option(help="If set, skip recording magnitude frequencies for faults."),
+    ] = False,
 ):
     """Generate the NSHM2022 rupture data from a CRU system solution package."""
 
@@ -125,15 +131,13 @@ def main(
     with zipfile.ZipFile(
         cru_solutions_zip_path, "r"
     ) as cru_solutions_zip_file, db.connection() as conn:
-
-        with cru_solutions_zip_file.open(
-            str(FAULT_INFORMATION_PATH)
-        ) as fault_info_handle:
-            faults_info = geojson.load(fault_info_handle)
-
-        faults = extract_faults_from_info(faults_info)
-
         if not skip_faults_creation:
+            with cru_solutions_zip_file.open(
+                str(FAULT_INFORMATION_PATH)
+            ) as fault_info_handle:
+                faults_info = geojson.load(fault_info_handle)
+
+            faults = extract_faults_from_info(faults_info)
             for i, fault in enumerate(faults):
                 fault_info = faults_info[i]
                 parent_id = fault_info.properties["ParentID"]
@@ -155,6 +159,23 @@ def main(
                     total=len(rupture_fault_join_df),
                 ):
                     db.add_fault_to_rupture(conn, row["rupture"], row["section"])
+        if not skip_mfds_creation:
+            with cru_solutions_zip_file.open(
+                str(MAGNITUDE_FREQUENCY_DISTRBUTIONS)
+            ) as mfds_handle:
+                df = pd.read_csv(mfds_handle)
+
+                def insert_magnitude(row):
+                    db.add_magnitude_probability(
+                        conn,
+                        int(row["Section Index"]),
+                        float(row["Magnitude"]),
+                        float(row["Rate"]),
+                    )
+
+                df.melt(
+                    ["Section Index"], var_name="Magnitude", value_name="Rate"
+                ).apply(insert_magnitude, axis=1)
 
 
 if __name__ == "__main__":
