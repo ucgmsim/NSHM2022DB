@@ -532,8 +532,7 @@ class Fault:
         valid_rates = self._magnitude_frequency_distribution[
             self._magnitude_frequency_distribution[:, 1] > 0
         ]
-        max_valid_rate = np.max(valid_rates[:, 1])
-        min_valid_rate = np.min(valid_rates[:, 0])
-
-        sp.exp
+        fit = np.polynomial.Polynomial.fit(
+            valid_rates[:, 0], np.log(valid_rates[:, 1]), deg=1, domain=[]
+        )
         return np.exp(fit(magnitudes))
