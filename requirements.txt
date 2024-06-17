@@ -4,5 +4,8 @@ numpy
 pandas
 qcore @ git+https://github.com/ucgmsim/qcore
 pygmt_helper @ https://github.com/ucgmsim/pygmt_helper
+pygments
+pygmt
+scipy
 tqdm
 typer
