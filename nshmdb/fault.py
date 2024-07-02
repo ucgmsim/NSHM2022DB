@@ -18,9 +18,9 @@ Fault:
 
 import dataclasses
 from enum import Enum
+from typing import Optional
 
 import numpy as np
-from typing import Optional
 from qcore import coordinates, geo
 
 
@@ -111,6 +111,10 @@ class FaultPlane:
         return self.corners_nztm[-1, -1]
 
     @property
+    def top_m(self) -> float:
+        return self.corners_nztm[0, -1]
+
+    @property
     def width(self) -> float:
         """
         Returns
@@ -193,7 +197,7 @@ class FaultPlane:
         float
             The dip angle of the fault.
         """
-        return np.degrees(np.arcsin(np.abs(self.bottom_m) / self.width_m))
+        return np.degrees(np.arcsin(np.abs(self.bottom_m - self.top_m) / self.width_m))
 
     def plane_coordinates_to_global_coordinates(
         self, plane_coordinates: np.ndarray
