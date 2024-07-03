@@ -1,10 +1,8 @@
-dataclasses
 geojson
 numpy
 pandas
-pygments
-pygmt
+pygmt_helper @ git+https://github.com/ucgmsim/pygmt_helper
 qcore @ git+https://github.com/ucgmsim/qcore
-scipy
+source_modelling @ git+https://github.com/ucgmsim/source_modelling
 tqdm
 typer
