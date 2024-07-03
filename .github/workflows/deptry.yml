@@ -13,5 +13,7 @@ jobs:
           python-version: '3.11'
       # Install deptry
       - run: pip install deptry
+      # Workaround for deptry not liking pyproject + requirements.txt
+      - run: rm pyproject.toml
       # Run deptry to check that all dependencies are present.
       - run: deptry .
