@@ -21,20 +21,42 @@ in the database.
 >>> db.get_rupture_faults(0) # Should return two faults in this rupture.
 """
 
+import collections
 import dataclasses
 import importlib.resources
 import sqlite3
 from pathlib import Path
 from sqlite3 import Connection
+from typing import Optional
 
 import numpy as np
-import qcore.coordinates
-
-from nshmdb import fault
-from nshmdb.fault import Fault
+from qcore import coordinates
+from source_modelling.sources import Fault, Plane
 
 
 @dataclasses.dataclass
+class FaultInfo:
+    """Fault metadata stored in the database.
+
+    fault_id : int
+        The id of the fault.
+    name : str
+        The name of the fault.
+    parent_id : int
+        The id of the parent fault for this fault.
+    rake : float
+        The rake of the fault.
+    tect_type : int
+        The tectonic type of the fault.
+    """
+
+    fault_id: int
+    name: str
+    parent_id: int
+    rake: float
+    tect_type: Optional[int]
+
+
 class NSHMDB:
     """Class for interacting with the NSHMDB database.
 
@@ -45,6 +67,9 @@ class NSHMDB:
     """
 
     db_filepath: Path
+
+    def __init__(self, db_filepath: Path):
+        self.db_filepath = db_filepath
 
     def create(self):
         """Create the tables for the NSHMDB database."""
@@ -87,7 +112,13 @@ class NSHMDB:
         )
 
     def insert_fault(
-        self, conn: Connection, fault_id: int, parent_id: int, fault: Fault
+        self,
+        conn: Connection,
+        fault_id: int,
+        parent_id: int,
+        fault_name: str,
+        fault_rake: float,
+        fault: Fault,
     ):
         """Insert fault data into the database.
 
@@ -99,12 +130,16 @@ class NSHMDB:
             ID of the fault.
         parent_id : int
             ID of the parent fault.
+        fault_name : str
+            The name of the fault.
+        fault_rake : float
+            The rake of the fault.
         fault : Fault
             Fault object containing fault geometry.
         """
         conn.execute(
-            """INSERT OR REPLACE INTO fault (fault_id, name, parent_id) VALUES (?, ?, ?)""",
-            (fault_id, fault.name, parent_id),
+            """INSERT OR REPLACE INTO fault (fault_id, name, rake, parent_id) VALUES (?, ?, ?, ?)""",
+            (fault_id, fault_name, fault_rake, parent_id),
         )
         for plane in fault.planes:
             conn.execute(
@@ -119,16 +154,14 @@ class NSHMDB:
                     bottom_left_lon,
                     top_depth,
                     bottom_depth,
-                    rake,
                     fault_id
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )""",
                 (
                     *plane.corners[:, :2].ravel(),
                     plane.corners[0, 2],
                     plane.corners[-1, 2],
-                    plane.rake,
                     fault_id,
                 ),
             )
@@ -183,7 +216,6 @@ class NSHMDB:
                 bottom_left_lon,
                 top,
                 bottom,
-                rake,
                 _,
             ) in cursor.fetchall():
                 corners = np.array(
@@ -194,14 +226,17 @@ class NSHMDB:
                         [bottom_left_lat, bottom_left_lon, bottom],
                     ]
                 )
-                planes.append(
-                    fault.FaultPlane(qcore.coordinates.wgs_depth_to_nztm(corners), rake)
-                )
+                planes.append(Plane(coordinates.wgs_depth_to_nztm(corners)))
             cursor.execute("SELECT * from fault where fault_id = ?", (fault_id,))
-            fault_id, name, _, _ = cursor.fetchone()
-            return Fault(name, None, planes)
+            return Fault(planes)
 
-    def get_rupture_faults(self, rupture_id: int) -> list[Fault]:
+    def get_fault_info(self, fault_id: int) -> FaultInfo:
+        with self.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * from fault where fault_id = ?", (fault_id,))
+            return FaultInfo(*cursor.fetchone())
+
+    def get_rupture_faults(self, rupture_id: int) -> dict[str, Fault]:
         """Retrieve faults involved in a rupture from the database.
 
         Parameters
@@ -210,7 +245,9 @@ class NSHMDB:
 
         Returns
         -------
-        list[Fault]
+        dict[str, Fault]
+            A dictionary with fault names as keys, and fault geometry
+            as values.
         """
         with self.connection() as conn:
             cursor = conn.cursor()
@@ -225,8 +262,7 @@ class NSHMDB:
                 (rupture_id,),
             )
             fault_planes = cursor.fetchall()
-            cur_parent_id = None
-            faults = []
+            faults = collections.defaultdict(lambda: Fault([]))
             for (
                 _,
                 top_left_lat,
@@ -239,20 +275,10 @@ class NSHMDB:
                 bottom_left_lon,
                 top,
                 bottom,
-                rake,
                 _,
                 parent_id,
                 parent_name,
             ) in fault_planes:
-                if parent_id != cur_parent_id:
-                    faults.append(
-                        Fault(
-                            name=parent_name,
-                            tect_type=None,
-                            planes=[],
-                        )
-                    )
-                    cur_parent_id = parent_id
                 corners = np.array(
                     [
                         [top_left_lat, top_left_lon, top],
@@ -261,7 +287,7 @@ class NSHMDB:
                         [bottom_left_lat, bottom_left_lon, bottom],
                     ]
                 )
-                faults[-1].planes.append(
-                    fault.FaultPlane(qcore.coordinates.wgs_depth_to_nztm(corners), rake)
+                faults[parent_name].planes.append(
+                    Plane(coordinates.wgs_depth_to_nztm(corners))
                 )
             return faults

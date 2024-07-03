@@ -22,20 +22,20 @@ Options:
 Example:
     python generate_nshm2022_data.py data/cru_solutions.zip output/nshm2022.sqlite
 """
+
 import zipfile
 from pathlib import Path
 from typing import Annotated
 
 import geojson
-import nshmdb.fault
 import numpy as np
 import pandas as pd
 import qcore.coordinates
 import tqdm
 import typer
 from geojson import FeatureCollection
-from nshmdb.fault import Fault
 from nshmdb.nshmdb import NSHMDB
+from source_modelling.sources import Fault, Plane
 
 app = typer.Typer()
 
@@ -46,7 +46,7 @@ RUPTURE_FAULT_JOIN_PATH = Path("ruptures") / "fast_indices.csv"
 
 def extract_faults_from_info(
     fault_info_list: FeatureCollection,
-) -> list[Fault]:
+) -> dict[str, Fault]:
     """Extract the fault geometry from the fault information description.
 
     Parameters
@@ -56,10 +56,11 @@ def extract_faults_from_info(
 
     Returns
     -------
-    list[Fault]
-        The list of extracted faults.
+    dict[str, Fault]
+        A dictionary of extracted faults. The key is the name of the
+        fault.
     """
-    faults = []
+    faults = {}
     for i in range(len(fault_info_list.features)):
         fault_feature = fault_info_list[i]
         fault_trace = list(geojson.utils.coords(fault_feature))
@@ -71,7 +72,6 @@ def extract_faults_from_info(
             projected_width = 0
         else:
             projected_width = bottom / np.tan(np.radians(dip))
-        rake = fault_feature.properties["Rake"]
         planes = []
         for i in range(len(fault_trace) - 1):
             top_left = qcore.coordinates.wgs_depth_to_nztm(
@@ -93,8 +93,8 @@ def extract_faults_from_info(
             bottom_left = top_left + dip_dir_direction
             bottom_right = top_right + dip_dir_direction
             corners = np.array([top_left, top_right, bottom_right, bottom_left])
-            planes.append(nshmdb.fault.FaultPlane(corners, rake))
-        faults.append(Fault(name, None, planes))
+            planes.append(Plane(corners))
+        faults[name] = Fault(planes)
     return faults
 
 
@@ -125,7 +125,6 @@ def main(
     with zipfile.ZipFile(
         cru_solutions_zip_path, "r"
     ) as cru_solutions_zip_file, db.connection() as conn:
-
         with cru_solutions_zip_file.open(
             str(FAULT_INFORMATION_PATH)
         ) as fault_info_handle:
@@ -134,12 +133,15 @@ def main(
         faults = extract_faults_from_info(faults_info)
 
         if not skip_faults_creation:
-            for i, fault in enumerate(faults):
+            for i, fault in enumerate(faults.values()):
                 fault_info = faults_info[i]
+                fault_id = fault_info.properties["FaultID"]
                 parent_id = fault_info.properties["ParentID"]
+                fault_name = fault_info.properties["FaultName"]
+                fault_rake = fault_info.properties["Rake"]
                 db.insert_parent(conn, parent_id, fault_info.properties["ParentName"])
                 db.insert_fault(
-                    conn, fault_info.properties["FaultID"], parent_id, fault
+                    conn, fault_id, parent_id, fault_name, fault_rake, fault
                 )
         if not skip_rupture_creation:
             with cru_solutions_zip_file.open(
