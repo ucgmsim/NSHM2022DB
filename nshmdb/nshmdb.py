@@ -291,3 +291,19 @@ class NSHMDB:
                     Plane(coordinates.wgs_depth_to_nztm(corners))
                 )
             return faults
+
+    def get_rupture_fault_info(self, rupture_id: int) -> dict[str, FaultInfo]:
+        with self.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT p.name, f.*
+                FROM fault f
+                JOIN rupture_faults rf on f.fault_id = rf.fault_id
+                JOIN parent_fault p ON f.parent_id = p.parent_id
+                WHERE rf.rupture_id = ?
+                """,
+                (rupture_id,),
+            )
+            fault_rows = cursor.fetchall()
+            return {row[0]: FaultInfo(*row[1:]) for row in fault_rows}
