@@ -42,6 +42,9 @@ app = typer.Typer()
 
 FAULT_INFORMATION_PATH = Path("ruptures") / "fault_sections.geojson"
 RUPTURE_FAULT_JOIN_PATH = Path("ruptures") / "fast_indices.csv"
+RUPTURE_RATES_PATH = "aggregate_rates.csv"
+RUPTURE_PROPERTIES_PATH = Path("ruptures") / "properties.csv"
+MFDS_PATH = Path('ruptures') / 'sub_seismo_on_fault_mfds.csv'
 
 
 def extract_faults_from_info(
@@ -116,6 +119,9 @@ def main(
     skip_rupture_creation: Annotated[
         bool, typer.Option(help="If flag is set, skip rupture creation.")
     ] = False,
+    skip_mfds_creation: Annotated[
+        bool, typer.Option(help="If flag is set, skip MFDS creation.")
+    ] = False,
 ):
     """Generate the NSHM2022 rupture data from a CRU system solution package."""
 
@@ -131,7 +137,6 @@ def main(
             faults_info = geojson.load(fault_info_handle)
 
         faults = extract_faults_from_info(faults_info)
-
         if not skip_faults_creation:
             for i, fault in enumerate(faults.values()):
                 fault_info = faults_info[i]
@@ -143,14 +148,46 @@ def main(
                 db.insert_fault(
                     conn, fault_id, parent_id, fault_name, fault_rake, fault
                 )
+        if not skip_mfds_creation:
+            with cru_solutions_zip_file.open(str(MFDS_PATH)) as mfds_file_handle, db.connection() as conn:
+                mfds = pd.read_csv(mfds_file_handle)
+                mfds = mfds.rename(columns={'Section Index': 'fault_id'})
+                mfds = mfds.melt(id_vars=['fault_id'], var_name='magnitude', value_name='rate')
+                mfds = mfds[mfds['rate'] > 0]
+                mfds.to_sql('magnitude_frequency_distribution', conn, index=False, if_exists='append')
+                
         if not skip_rupture_creation:
             with cru_solutions_zip_file.open(
                 str(RUPTURE_FAULT_JOIN_PATH)
-            ) as rupture_fault_join_handle:
+            ) as rupture_fault_join_handle, cru_solutions_zip_file.open(
+                str(RUPTURE_RATES_PATH)
+            ) as rupture_rates_handle, cru_solutions_zip_file.open(
+                str(RUPTURE_PROPERTIES_PATH)
+            ) as rupture_properties_path:
+            
+                rupture_rates = pd.read_csv(rupture_rates_handle).set_index(
+                    "Rupture Index"
+                )
+                rupture_properties = pd.read_csv(rupture_properties_path).set_index(
+                    "Rupture Index"
+                )
+                rupture_properties = rupture_properties.join(rupture_rates)
+                rupture_properties.apply(
+                    lambda rupture: db.add_rupture(
+                        conn,
+                        rupture.name,
+                        rupture["Magnitude"],
+                        rupture["Area (m^2)"],
+                        rupture["Length (m)"],
+                        rupture["rate_weighted_mean"],
+                    ),
+                    axis=1,
+                )
                 rupture_fault_join_df = pd.read_csv(rupture_fault_join_handle)
                 rupture_fault_join_df["section"] = rupture_fault_join_df[
                     "section"
                 ].astype("Int64")
+
                 for _, row in tqdm.tqdm(
                     rupture_fault_join_df.iterrows(),
                     desc="Binding ruptures to faults",

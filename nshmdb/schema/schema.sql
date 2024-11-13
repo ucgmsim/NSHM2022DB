@@ -29,7 +29,11 @@ CREATE TABLE IF NOT EXISTS fault_plane (
 );
 
 CREATE TABLE IF NOT EXISTS rupture (
-    rupture_id INTEGER PRIMARY KEY
+    rupture_id INTEGER PRIMARY KEY,
+    area REAL,
+    magnitude REAL,
+    len REAL,
+    rate REAL
     -- Maybe I'll add some extra tables here?
 );
 
@@ -50,3 +54,9 @@ CREATE TABLE IF NOT EXISTS magnitude_frequency_distribution (
     UNIQUE(fault_id, magnitude)
     FOREIGN KEY(fault_id) REFERENCES fault(fault_id)
 );
+
+CREATE INDEX IF NOT EXISTS fault_parent_id_index on fault (parent_id);
+CREATE INDEX IF NOT EXISTS fault_id_index on fault_plane (fault_id);
+CREATE UNIQUE INDEX IF NOT EXISTS rupture_faults_index on rupture_faults (rupture_id, fault_id);
+CREATE INDEX IF NOT EXISTS rupture_rate_index on rupture (rate);
+CREATE UNIQUE INDEX IF NOT EXISTS magnitude_frequency_distribution_index on magnitude_frequency_distribution (fault_id, magnitude);

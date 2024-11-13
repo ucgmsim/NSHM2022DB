@@ -29,9 +29,26 @@ from pathlib import Path
 from sqlite3 import Connection
 from typing import Optional
 
+import duckdb
 import numpy as np
 from qcore import coordinates
 from source_modelling.sources import Fault, Plane
+
+
+from nshmdb import query
+
+
+@dataclasses.dataclass
+class Rupture:
+    rupture_id: int
+    magnitude: float
+    area: float
+    length: float
+    rate: Optional[float]
+    faults: dict[str, Fault]
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(rupture_id={self.rupture_id}, magnitude={self.magnitude}, area={self.area}, rate={self.rate}, faults={list(self.faults)})"
 
 
 @dataclasses.dataclass
@@ -166,6 +183,48 @@ class NSHMDB:
                 ),
             )
 
+    def add_rupture(
+        self,
+        conn: Connection,
+        rupture_id: int,
+        magnitude: float,
+        area: float,
+        length: float,
+        rate: float,
+    ) -> None:
+        conn.execute(
+            "INSERT INTO rupture (rupture_id, magnitude, area, len, rate) VALUES (?, ?, ?, ?, ?)",
+            (rupture_id, magnitude, area, length, rate),
+        )
+
+    def most_likely_fault(self, rupture_id: int, magnitude: float) -> dict[str, list[float]]:
+        '''Return the segment in the rupture with the highest annual rate.'''
+        with self.connection() as conn:
+            magnitudes = np.array( conn.execute('''SELECT DISTINCT mfd.magnitude
+            FROM magnitude_frequency_distribution mfd
+            JOIN rupture_faults rf ON rf.fault_id = mfd.fault_id
+            WHERE rf.rupture_id = ?
+            ORDER BY mfd.magnitude''', (rupture_id,)).fetchall()).ravel()
+            breakpoint()
+            idx = min(np.searchsorted(magnitudes, magnitude), len(magnitudes) - 1)
+            if idx == len(magnitudes) - 1:
+                magnitude_rounded = magnitudes[idx]
+            else:
+                magnitude_rounded = np.min(magnitudes[idx], magnitudes[idx + 1])
+            rates = conn.execute('''SELECT pf.name, mfd.rate
+            FROM parent_fault pf
+            JOIN fault f ON f.parent_id = pf.parent_id
+            JOIN rupture_faults rf ON rf.fault_id = f.fault_id
+            JOIN magnitude_frequency_distribution mfd ON mfd.fault_id = f.fault_id
+            WHERE rf.rupture_id = ?
+              AND mfd.magnitude = ?
+            ''', (rupture_id,magnitude_rounded))
+            segment_rates = collections.defaultdict(list)
+            for parent_fault_name, rate in rates:
+                segment_rates[parent_fault_name].append(rate)
+            return segment_rates
+            
+
     def add_fault_to_rupture(self, conn: Connection, rupture_id: int, fault_id: int):
         """Insert rupture data into the database.
 
@@ -179,7 +238,7 @@ class NSHMDB:
             List of faults involved in the rupture.
         """
         conn.execute(
-            "INSERT OR REPLACE INTO rupture (rupture_id) VALUES (?)", (rupture_id,)
+            "INSERT OR IGNORE INTO rupture (rupture_id) VALUES (?)", (rupture_id,)
         )
         conn.execute(
             "INSERT INTO rupture_faults (rupture_id, fault_id) VALUES (?, ?)",
@@ -235,6 +294,23 @@ class NSHMDB:
             cursor = conn.cursor()
             cursor.execute("SELECT * from fault where fault_id = ?", (fault_id,))
             return FaultInfo(*cursor.fetchone())
+
+    def get_rupture(self, rupture_id: int) -> Rupture:
+        with self.connection() as conn:
+            cursor = conn.cursor()
+            (rupture_id, magnitude, area, length, rate) = cursor.execute(
+                "SELECT rupture_id, magnitude, area, len, rate FROM rupture WHERE rupture_id = ?",
+                (rupture_id,),
+            ).fetchone()
+
+        return Rupture(
+            rupture_id=rupture_id,
+            magnitude=magnitude,
+            area=area,
+            length=length,
+            rate=rate,
+            faults=self.get_rupture_faults(rupture_id),
+        )
 
     def get_rupture_faults(self, rupture_id: int) -> dict[str, Fault]:
         """Retrieve faults involved in a rupture from the database.
@@ -307,3 +383,39 @@ class NSHMDB:
             )
             fault_rows = cursor.fetchall()
             return {row[0]: FaultInfo(*row[1:]) for row in fault_rows}
+
+    def get_fault_names(self) -> list[str]:
+        with self.connection() as conn:
+            return [
+                name
+                for (name,) in conn.execute("SELECT name FROM parent_fault").fetchall()
+            ]
+
+    def query(
+        self,
+        query_str: str,
+        magnitude_bounds: tuple[Optional[float], Optional[float]] = (None, None),
+        rate_bounds: tuple[Optional[float], Optional[float]] = (None, None),
+        limit: int = 100,
+        fault_count_limit: Optional[int] = None,
+    ) -> dict[int, Rupture]:
+        conn = duckdb.connect(self.db_filepath)
+        sql_query, parameters = query.to_sql(
+            query_str,
+            rate_bounds=rate_bounds,
+            magnitude_bounds=magnitude_bounds,
+            limit=limit,
+            fault_count_limit=fault_count_limit,
+        )
+        ruptures = conn.sql(sql_query, params=parameters).fetchall()
+        return {
+            id: Rupture(
+                rupture_id=id,
+                magnitude=magnitude,
+                area=area,
+                length=length,
+                rate=rate,
+                faults=self.get_rupture_faults(id),
+            )
+            for (id, magnitude, area, length, rate) in ruptures
+        }
