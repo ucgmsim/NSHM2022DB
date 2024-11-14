@@ -420,6 +420,30 @@ class NSHMDB:
         limit: int = 100,
         fault_count_limit: Optional[int] = None,
     ) -> dict[int, Rupture]:
+        """Make an advanced query for ruptures in the database using the query engine in `nshmdb.query`.
+
+        See `nshmdb.query.to_sql` for details on what the parameters
+        of this function should look like.
+
+        Parameters
+        ----------
+        query_str : str
+            The query string to execute.
+        magnitude_bounds : tuple[Optional[float], Optional[float]]
+            The magnitude bounds.
+        rate_bounds : tuple[Optional[float], Optional[float]]
+            The rate bounds.
+        limit : int
+            The limit on the number of returned ruptures.
+        fault_count_limit : Optional[int]
+            The fault count limit on the returned ruptures.
+
+
+        Returns
+        -------
+        dict[int, Rupture]
+            A mapping from rupture id to Rupture object for each rupture satisfying the query parameters.
+        """
         conn = duckdb.connect(self.db_filepath)
         sql_query, parameters = query.to_sql(
             query_str,
