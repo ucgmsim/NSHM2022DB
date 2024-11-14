@@ -34,7 +34,6 @@ import numpy as np
 from qcore import coordinates
 from source_modelling.sources import Fault, Plane
 
-
 from nshmdb import query
 
 
@@ -197,33 +196,55 @@ class NSHMDB:
             (rupture_id, magnitude, area, length, rate),
         )
 
-    def most_likely_fault(self, rupture_id: int, magnitude: float) -> dict[str, list[float]]:
-        '''Return the segment in the rupture with the highest annual rate.'''
+    def most_likely_fault(
+        self, rupture_id: int, parent_fault_magnitudes: dict[str, float]
+    ) -> dict[str, list[float]]:
+        """Return the segment in the rupture with the highest annual rate."""
         with self.connection() as conn:
-            magnitudes = np.array( conn.execute('''SELECT DISTINCT mfd.magnitude
+            magnitudes = np.array(
+                conn.execute(
+                    """SELECT DISTINCT mfd.magnitude
             FROM magnitude_frequency_distribution mfd
             JOIN rupture_faults rf ON rf.fault_id = mfd.fault_id
             WHERE rf.rupture_id = ?
-            ORDER BY mfd.magnitude''', (rupture_id,)).fetchall()).ravel()
-            breakpoint()
-            idx = min(np.searchsorted(magnitudes, magnitude), len(magnitudes) - 1)
-            if idx == len(magnitudes) - 1:
-                magnitude_rounded = magnitudes[idx]
-            else:
-                magnitude_rounded = np.min(magnitudes[idx], magnitudes[idx + 1])
-            rates = conn.execute('''SELECT pf.name, mfd.rate
+            ORDER BY mfd.magnitude""",
+                    (rupture_id,),
+                ).fetchall()
+            ).ravel()
+            idx = np.minimum(
+                np.searchsorted(magnitudes, list(parent_fault_magnitudes.values())),
+                len(magnitudes) - 1,
+            )
+            parent_fault_magnitudes_rounded = np.minimum(
+                magnitudes[idx], magnitudes[np.minimum(idx + 1, len(magnitudes) - 1)]
+            )
+            rates = conn.execute(
+                """SELECT pf.name, mfd.rate
             FROM parent_fault pf
             JOIN fault f ON f.parent_id = pf.parent_id
             JOIN rupture_faults rf ON rf.fault_id = f.fault_id
             JOIN magnitude_frequency_distribution mfd ON mfd.fault_id = f.fault_id
-            WHERE rf.rupture_id = ?
-              AND mfd.magnitude = ?
-            ''', (rupture_id,magnitude_rounded))
+            WHERE rf.rupture_id = ? AND
+            ("""
+                + " OR ".join(
+                    ["pf.name = ? AND mfd.magnitude = ?"] * len(parent_fault_magnitudes)
+                )
+                + ")",
+                (rupture_id,)
+                + tuple(
+                    [
+                        item
+                        for tup in zip(
+                            parent_fault_magnitudes, parent_fault_magnitudes_rounded
+                        )
+                        for item in tup
+                    ]
+                ),
+            )
             segment_rates = collections.defaultdict(list)
             for parent_fault_name, rate in rates:
                 segment_rates[parent_fault_name].append(rate)
             return segment_rates
-            
 
     def add_fault_to_rupture(self, conn: Connection, rupture_id: int, fault_id: int):
         """Insert rupture data into the database.
