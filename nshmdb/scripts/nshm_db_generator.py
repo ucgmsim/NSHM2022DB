@@ -44,7 +44,7 @@ FAULT_INFORMATION_PATH = Path("ruptures") / "fault_sections.geojson"
 RUPTURE_FAULT_JOIN_PATH = Path("ruptures") / "fast_indices.csv"
 RUPTURE_RATES_PATH = "aggregate_rates.csv"
 RUPTURE_PROPERTIES_PATH = Path("ruptures") / "properties.csv"
-MFDS_PATH = Path('ruptures') / 'sub_seismo_on_fault_mfds.csv'
+MFDS_PATH = Path("ruptures") / "sub_seismo_on_fault_mfds.csv"
 
 
 def extract_faults_from_info(
@@ -144,18 +144,56 @@ def main(
                 parent_id = fault_info.properties["ParentID"]
                 fault_name = fault_info.properties["FaultName"]
                 fault_rake = fault_info.properties["Rake"]
-                db.insert_parent(conn, parent_id, fault_info.properties["ParentName"])
-                db.insert_fault(
-                    conn, fault_id, parent_id, fault_name, fault_rake, fault
+                conn.execute(
+                    """INSERT OR REPLACE INTO parent_fault (parent_id, name) VALUES (?, ?)""",
+                    (parent_id, fault_info.properties["ParentName"]),
                 )
+                conn.execute(
+                    """INSERT OR REPLACE INTO fault (fault_id, name, rake, parent_id) VALUES (?, ?, ?, ?)""",
+                    (fault_id, fault_name, fault_rake, parent_id),
+                )
+                conn.executemany(
+                    """INSERT INTO fault_plane (
+                            top_left_lat,
+                            top_left_lon,
+                            top_right_lat,
+                            top_right_lon,
+                            bottom_right_lat,
+                            bottom_right_lon,
+                            bottom_left_lat,
+                            bottom_left_lon,
+                            top_depth,
+                            bottom_depth,
+                            fault_id
+                        ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        )""",
+                    [
+                        (
+                            *plane.corners[:, :2].ravel(),
+                            plane.corners[0, 2],
+                            plane.corners[-1, 2],
+                            fault_id,
+                        )
+                        for plane in fault.planes
+                    ],
+                )
+
         if not skip_mfds_creation:
-            with cru_solutions_zip_file.open(str(MFDS_PATH)) as mfds_file_handle, db.connection() as conn:
+            with cru_solutions_zip_file.open(str(MFDS_PATH)) as mfds_file_handle:
                 mfds = pd.read_csv(mfds_file_handle)
-                mfds = mfds.rename(columns={'Section Index': 'fault_id'})
-                mfds = mfds.melt(id_vars=['fault_id'], var_name='magnitude', value_name='rate')
-                mfds = mfds[mfds['rate'] > 0]
-                mfds.to_sql('magnitude_frequency_distribution', conn, index=False, if_exists='append')
-                
+                mfds = mfds.rename(columns={"Section Index": "fault_id"})
+                mfds = mfds.melt(
+                    id_vars=["fault_id"], var_name="magnitude", value_name="rate"
+                )
+                mfds = mfds[mfds["rate"] > 0]
+                mfds.to_sql(
+                    "magnitude_frequency_distribution",
+                    conn,
+                    index=False,
+                    if_exists="append",
+                )
+
         if not skip_rupture_creation:
             with cru_solutions_zip_file.open(
                 str(RUPTURE_FAULT_JOIN_PATH)
@@ -164,7 +202,6 @@ def main(
             ) as rupture_rates_handle, cru_solutions_zip_file.open(
                 str(RUPTURE_PROPERTIES_PATH)
             ) as rupture_properties_path:
-            
                 rupture_rates = pd.read_csv(rupture_rates_handle).set_index(
                     "Rupture Index"
                 )
@@ -172,28 +209,35 @@ def main(
                     "Rupture Index"
                 )
                 rupture_properties = rupture_properties.join(rupture_rates)
-                rupture_properties.apply(
-                    lambda rupture: db.add_rupture(
-                        conn,
-                        rupture.name,
-                        rupture["Magnitude"],
-                        rupture["Area (m^2)"],
-                        rupture["Length (m)"],
-                        rupture["rate_weighted_mean"],
-                    ),
-                    axis=1,
+                rupture_properties = rupture_properties.rename(
+                    columns={
+                        "Magnitude": "magnitude",
+                        "Area (m^2)": "area",
+                        "Length (m)": "len",
+                        "rate_weighted_mean": "rate",
+                    }
                 )
+                rupture_properties = rupture_properties[
+                    ["magnitude", "area", "len", "rate"]
+                ]
+                rupture_properties.to_sql(
+                    "rupture",
+                    conn,
+                    index=True,
+                    index_label="rupture_id",
+                    if_exists="append",
+                )
+
                 rupture_fault_join_df = pd.read_csv(rupture_fault_join_handle)
                 rupture_fault_join_df["section"] = rupture_fault_join_df[
                     "section"
                 ].astype("Int64")
-
-                for _, row in tqdm.tqdm(
-                    rupture_fault_join_df.iterrows(),
-                    desc="Binding ruptures to faults",
-                    total=len(rupture_fault_join_df),
-                ):
-                    db.add_fault_to_rupture(conn, row["rupture"], row["section"])
+                rupture_fault_join_df = rupture_fault_join_df.rename(
+                    columns={"section": "fault_id", "rupture": "rupture_id"}
+                )
+                rupture_fault_join_df.to_sql(
+                    "rupture_faults", conn, index=False, if_exists="append"
+                )
 
 
 if __name__ == "__main__":

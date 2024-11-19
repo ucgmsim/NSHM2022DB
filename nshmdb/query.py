@@ -220,7 +220,7 @@ def to_sql(
     rate_bounds: tuple[Optional[float], Optional[float]] = (None, None),
     limit: int = 100,
     fault_count_limit: Optional[int] = None,
-) -> tuple[str, tuple[Any, ...]]:
+) -> tuple[str, list[Any]]:
     """Construct a DuckDB SQL query using a rich expression language and variable bounds.
 
     The query parameter is expected to be a string that expresses the
@@ -305,9 +305,11 @@ def to_sql(
         rate_expression += "AND rupture.rate <= ?"
         parameters.append(rate_bounds[1])
 
+    fault_count_expression = ""
     if fault_count_limit:
         fault_count_expression = "COUNT(DISTINCT parent_fault.parent_id) <= ? AND "
         parameters.append(fault_count_limit)
+
     sql_expression = f"""SELECT
      rupture.rupture_id, ANY_VALUE(rupture.magnitude), ANY_VALUE(rupture.area), ANY_VALUE(rupture.len), ANY_VALUE(rupture.rate)
     FROM rupture
@@ -324,6 +326,7 @@ def to_sql(
     DESC NULLS LAST
     LIMIT ?
     """
+
     parameters.extend(query_parameters(expression))
     parameters.append(limit)
 
