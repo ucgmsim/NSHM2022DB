@@ -14,6 +14,7 @@ jobs:
       # Install deptry
       - run: pip install deptry
       # Workaround for deptry not liking pyproject + requirements.txt
+      - run: sed -i -e '/pytest/d' -e '/hypothesis/d' -e '/diffimg/d' requirements.txt
       - run: rm pyproject.toml
       - run: pip install -r requirements.txt
       # Run deptry to check that all dependencies are present.
