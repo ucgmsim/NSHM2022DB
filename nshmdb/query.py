@@ -175,13 +175,16 @@ def parse(expression: str) -> ExpressionTree:
     tokens = lex(expression)
 
     def expr_binding_power(token_iterator: TokenStream, min_binding_power: int):
-        """ """
         token = next(token_iterator)
 
         match token:
             case Token(token_type=TokenType.LPAR):
                 inner = expr_binding_power(token_iterator, 0)
-                if next(token_iterator).token_type != TokenType.RPAR:
+
+                if (
+                    not token_iterator.peek()
+                    or next(token_iterator).token_type != TokenType.RPAR
+                ):
                     raise ValueError(f"Invalid search expression {expression}")
                 lhs = inner
             case Token(token_type=TokenType.INFIX_OPERATOR, value=op):
