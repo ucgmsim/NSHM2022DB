@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import numpy as np
 from nshmdb.nshmdb import NSHMDB
 from nshmdb.scripts import nshm_db_generator
 
