@@ -31,7 +31,6 @@ import geojson
 import numpy as np
 import pandas as pd
 import qcore.coordinates
-import tqdm
 import typer
 from geojson import FeatureCollection
 from nshmdb.nshmdb import NSHMDB
