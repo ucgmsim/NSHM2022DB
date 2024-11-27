@@ -130,7 +130,6 @@ def test_get_rupture_fault_info(alpine_fault_nshmdb: NSHMDB):
 
 def test_query(alpine_fault_nshmdb: NSHMDB):
     ruptures = alpine_fault_nshmdb.query("Alpine Fault")
-    print(ruptures)
     assert set(ruptures) == {1}
     rupture = ruptures[1]
     assert rupture.rupture_id == 1
