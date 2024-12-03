@@ -21,20 +21,67 @@ in the database.
 >>> db.get_rupture_faults(0) # Should return two faults in this rupture.
 """
 
+import collections
 import dataclasses
 import importlib.resources
 import sqlite3
 from pathlib import Path
 from sqlite3 import Connection
+from typing import Optional
 
+import duckdb
 import numpy as np
-import qcore.coordinates
+from qcore import coordinates
+from source_modelling.sources import Fault, Plane
 
-from nshmdb import fault
-from nshmdb.fault import Fault
+from nshmdb import query
 
 
 @dataclasses.dataclass
+class Rupture:
+    """A rupture from the database."""
+
+    rupture_id: int
+    """The rupture id."""
+    magnitude: float
+    """The rupture magnitude (note: this is not the moment magnitude)"""
+    area: float
+    """The rupture area (in km^2)."""
+    length: float
+    """The rupture length (in km)."""
+    rate: Optional[float]
+    """An optional yearly rate of rupture."""
+    faults: dict[str, Fault]
+    """The faults in the rupture."""
+    """"""
+
+    def __repr__(self) -> str:
+        """Return a human readable debug representation of the Rupture object.
+
+        Returns
+        -------
+        str
+            The rupture representation.
+        """
+        return f"{self.__class__.__name__}(rupture_id={self.rupture_id}, magnitude={self.magnitude}, area={self.area}, rate={self.rate}, faults={list(self.faults)})"
+
+
+@dataclasses.dataclass
+class FaultInfo:
+    """Fault metadata stored in the database."""
+
+    fault_id: int
+    """The id of the fault."""
+    name: str
+    """The name of the fault."""
+    parent_id: int
+    """The id of the parent fault for this fault."""
+    rake: float
+    """The rake of the fault."""
+    tect_type: Optional[int]
+    """The tectonic type of the fault."""
+
+
 class NSHMDB:
     """Class for interacting with the NSHMDB database.
 
@@ -45,6 +92,9 @@ class NSHMDB:
     """
 
     db_filepath: Path
+
+    def __init__(self, db_filepath: Path):
+        self.db_filepath = db_filepath
 
     def create(self):
         """Create the tables for the NSHMDB database."""
@@ -64,74 +114,113 @@ class NSHMDB:
         """
         return sqlite3.connect(self.db_filepath)
 
-    # The functions `insert_parent`, `insert_fault`, and `add_fault_to_rupture`
-    # reuse a connection for efficiency (rather than use db.connection()). There
-    # are thousands of faults and tens of millions of rupture, fault binding
-    # pairs. Without reusing a connection it takes hours to setup the database.
-
-    def insert_parent(self, conn: Connection, parent_id: int, parent_name: str):
-        """Insert parent fault data into the database.
-
-        Parameters
-        ----------
-        conn : Connection
-            The db connection object.
-        parent_id : int
-            ID of the parent fault.
-        name : str
-            Name of the parent fault.
-        """
-        conn.execute(
-            """INSERT OR REPLACE INTO parent_fault (parent_id, name) VALUES (?, ?)""",
-            (parent_id, parent_name),
-        )
-
-    def insert_fault(
-        self, conn: Connection, fault_id: int, parent_id: int, fault: Fault
-    ):
-        """Insert fault data into the database.
+    def add_rupture(
+        self,
+        conn: Connection,
+        rupture_id: int,
+        magnitude: float,
+        area: float,
+        length: float,
+        rate: float,
+    ) -> None:
+        """Add a rupture into the database.
 
         Parameters
         ----------
         conn : Connection
-            The db connection object.
-        fault_id : int
-            ID of the fault.
-        parent_id : int
-            ID of the parent fault.
-        fault : Fault
-            Fault object containing fault geometry.
+            The SQLite db connection.
+        rupture_id : int
+            The rupture id.
+        magnitude : float
+            The magnitude of the rupture.
+        area : float
+            The area of the rupture.
+        length : float
+            The length of the rupture.
+        rate : float
+            The rupture rate.
         """
         conn.execute(
-            """INSERT OR REPLACE INTO fault (fault_id, name, parent_id) VALUES (?, ?, ?)""",
-            (fault_id, fault.name, parent_id),
+            "INSERT INTO rupture (rupture_id, magnitude, area, len, rate) VALUES (?, ?, ?, ?, ?)",
+            (rupture_id, magnitude, area, length, rate),
         )
-        for plane in fault.planes:
-            conn.execute(
-                """INSERT INTO fault_plane (
-                    top_left_lat,
-                    top_left_lon,
-                    top_right_lat,
-                    top_right_lon,
-                    bottom_right_lat,
-                    bottom_right_lon,
-                    bottom_left_lat,
-                    bottom_left_lon,
-                    top_depth,
-                    bottom_depth,
-                    rake,
-                    fault_id
-                ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                )""",
-                (
-                    *plane.corners[:, :2].ravel(),
-                    plane.corners[0, 2],
-                    plane.corners[-1, 2],
-                    plane.rake,
-                    fault_id,
+
+    def most_likely_fault(
+        self, rupture_id: int, parent_fault_magnitudes: dict[str, float]
+    ) -> dict[str, float]:
+        """
+        Calculate the cumulative activity rate for each fault involved in a specified rupture.
+
+        This function queries the database for the activity rates associated with the expected
+        magnitudes of each fault within a given rupture. The `parent_fault_magnitudes`
+        parameter provides a mapping of each fault in the rupture to its expected magnitude,
+        which is determined based on magnitude scaling relations without requiring knowledge
+        of the rupture path. Using the magnitude frequency distribution (MFD) in the database,
+        the function retrieves the closest available magnitude to the one provided, and sums
+        the associated activity rates to create a "pseudo-activity rate" for each fault.
+
+        This cumulative activity rate is returned as a dictionary mapping each fault segment
+        to its calculated rate, supporting downstream processes in determining a likely starting
+        fault for rupture propagation (see `workflow.scripts.nshm2022_to_realisation`).
+
+        Parameters
+        ----------
+        rupture_id : int
+            The unique identifier of the rupture to query.
+        parent_fault_magnitudes : dict[str, float]
+            A mapping of parent fault names to their expected magnitudes. These magnitudes
+            define the target values for querying activity rates in the MFD table.
+
+        Returns
+        -------
+        dict[str, float]
+            A dictionary mapping each parent fault name to its cumulative activity rate
+            at the given magnitude.
+        """
+        with self.connection() as conn:
+            magnitudes = np.array(
+                conn.execute(
+                    """SELECT DISTINCT mfd.magnitude
+            FROM magnitude_frequency_distribution mfd
+            JOIN rupture_faults rf ON rf.fault_id = mfd.fault_id
+            WHERE rf.rupture_id = ?
+            ORDER BY mfd.magnitude""",
+                    (rupture_id,),
+                ).fetchall()
+            ).ravel()
+            idx = np.minimum(
+                np.searchsorted(magnitudes, list(parent_fault_magnitudes.values())),
+                len(magnitudes) - 1,
+            )
+            parent_fault_magnitudes_rounded = np.minimum(
+                magnitudes[idx], magnitudes[np.minimum(idx + 1, len(magnitudes) - 1)]
+            )
+            rates = conn.execute(
+                """SELECT pf.name, SUM(mfd.rate)
+            FROM parent_fault pf
+            JOIN fault f ON f.parent_id = pf.parent_id
+            JOIN rupture_faults rf ON rf.fault_id = f.fault_id
+            JOIN magnitude_frequency_distribution mfd ON mfd.fault_id = f.fault_id
+            WHERE rf.rupture_id = ? AND
+            ("""
+                + " OR ".join(
+                    ["pf.name = ? AND mfd.magnitude = ?"] * len(parent_fault_magnitudes)
+                )
+                + """) GROUP BY pf.name""",
+                (rupture_id,)
+                + tuple(
+                    [
+                        item
+                        for tup in zip(
+                            parent_fault_magnitudes, parent_fault_magnitudes_rounded
+                        )
+                        for item in tup
+                    ]
                 ),
             )
+            return {
+                segment_name: cumulative_rate for segment_name, cumulative_rate in rates
+            }
 
     def add_fault_to_rupture(self, conn: Connection, rupture_id: int, fault_id: int):
         """Insert rupture data into the database.
@@ -146,7 +235,7 @@ class NSHMDB:
             List of faults involved in the rupture.
         """
         conn.execute(
-            "INSERT OR REPLACE INTO rupture (rupture_id) VALUES (?)", (rupture_id,)
+            "INSERT OR IGNORE INTO rupture (rupture_id) VALUES (?)", (rupture_id,)
         )
         conn.execute(
             "INSERT INTO rupture_faults (rupture_id, fault_id) VALUES (?, ?)",
@@ -183,7 +272,6 @@ class NSHMDB:
                 bottom_left_lon,
                 top,
                 bottom,
-                rake,
                 _,
             ) in cursor.fetchall():
                 corners = np.array(
@@ -194,14 +282,60 @@ class NSHMDB:
                         [bottom_left_lat, bottom_left_lon, bottom],
                     ]
                 )
-                planes.append(
-                    fault.FaultPlane(qcore.coordinates.wgs_depth_to_nztm(corners), rake)
-                )
+                planes.append(Plane(coordinates.wgs_depth_to_nztm(corners)))
             cursor.execute("SELECT * from fault where fault_id = ?", (fault_id,))
-            fault_id, name, _, _ = cursor.fetchone()
-            return Fault(name, None, planes)
+            return Fault(planes)
 
-    def get_rupture_faults(self, rupture_id: int) -> list[Fault]:
+    def get_fault_info(self, fault_id: int) -> FaultInfo:
+        """Get the fault information for a given fault id.
+
+        Parameters
+        ----------
+        fault_id : int
+            The fault id to retreive info for.
+
+
+        Returns
+        -------
+        FaultInfo
+            The fault information.
+        """
+        with self.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * from fault where fault_id = ?", (fault_id,))
+            return FaultInfo(*cursor.fetchone())
+
+    def get_rupture(self, rupture_id: int) -> Rupture:
+        """Retrieve a rupture from the database.
+
+        Parameters
+        ----------
+        rupture_id : int
+            The rupture to retrieve.
+
+
+        Returns
+        -------
+        Rupture
+            The rupture from the database.
+        """
+        with self.connection() as conn:
+            cursor = conn.cursor()
+            (rupture_id, magnitude, area, length, rate) = cursor.execute(
+                "SELECT rupture_id, magnitude, area, len, rate FROM rupture WHERE rupture_id = ?",
+                (rupture_id,),
+            ).fetchone()
+
+        return Rupture(
+            rupture_id=rupture_id,
+            magnitude=magnitude,
+            area=area,
+            length=length,
+            rate=rate,
+            faults=self.get_rupture_faults(rupture_id),
+        )
+
+    def get_rupture_faults(self, rupture_id: int) -> dict[str, Fault]:
         """Retrieve faults involved in a rupture from the database.
 
         Parameters
@@ -210,7 +344,9 @@ class NSHMDB:
 
         Returns
         -------
-        list[Fault]
+        dict[str, Fault]
+            A dictionary with fault names as keys, and fault geometry
+            as values.
         """
         with self.connection() as conn:
             cursor = conn.cursor()
@@ -225,8 +361,7 @@ class NSHMDB:
                 (rupture_id,),
             )
             fault_planes = cursor.fetchall()
-            cur_parent_id = None
-            faults = []
+            faults = collections.defaultdict(lambda: Fault([]))
             for (
                 _,
                 top_left_lat,
@@ -239,20 +374,10 @@ class NSHMDB:
                 bottom_left_lon,
                 top,
                 bottom,
-                rake,
                 _,
                 parent_id,
                 parent_name,
             ) in fault_planes:
-                if parent_id != cur_parent_id:
-                    faults.append(
-                        Fault(
-                            name=parent_name,
-                            tect_type=None,
-                            planes=[],
-                        )
-                    )
-                    cur_parent_id = parent_id
                 corners = np.array(
                     [
                         [top_left_lat, top_left_lon, top],
@@ -261,7 +386,103 @@ class NSHMDB:
                         [bottom_left_lat, bottom_left_lon, bottom],
                     ]
                 )
-                faults[-1].planes.append(
-                    fault.FaultPlane(qcore.coordinates.wgs_depth_to_nztm(corners), rake)
+                faults[parent_name].planes.append(
+                    Plane(coordinates.wgs_depth_to_nztm(corners))
                 )
             return faults
+
+    def get_rupture_fault_info(self, rupture_id: int) -> dict[str, FaultInfo]:
+        """Get the rupture fault information for a given rupture.
+
+        Parameters
+        ----------
+        rupture_id : int
+            The rupture id.
+
+
+        Returns
+        -------
+        dict[str, FaultInfo]
+            A dictionary mapping fault name to fault information for each fault in the rupture.
+        """
+        with self.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT p.name, f.*
+                FROM fault f
+                JOIN rupture_faults rf on f.fault_id = rf.fault_id
+                JOIN parent_fault p ON f.parent_id = p.parent_id
+                WHERE rf.rupture_id = ?
+                """,
+                (rupture_id,),
+            )
+            fault_rows = cursor.fetchall()
+            return {row[0]: FaultInfo(*row[1:]) for row in fault_rows}
+
+    def get_fault_names(self) -> set[str]:
+        """Get the list of fault names in the database.
+
+        Returns
+        -------
+        set[str]
+            The list of fault names.
+        """
+        with self.connection() as conn:
+            return {
+                name
+                for (name,) in conn.execute("SELECT name FROM parent_fault").fetchall()
+            }
+
+    def query(
+        self,
+        query_str: str,
+        magnitude_bounds: tuple[Optional[float], Optional[float]] = (None, None),
+        rate_bounds: tuple[Optional[float], Optional[float]] = (None, None),
+        limit: int = 100,
+        fault_count_limit: Optional[int] = None,
+    ) -> dict[int, Rupture]:
+        """Make an advanced query for ruptures in the database using the query engine in `nshmdb.query`.
+
+        See `nshmdb.query.to_sql` for details on what the parameters
+        of this function should look like.
+
+        Parameters
+        ----------
+        query_str : str
+            The query string to execute.
+        magnitude_bounds : tuple[Optional[float], Optional[float]]
+            The magnitude bounds.
+        rate_bounds : tuple[Optional[float], Optional[float]]
+            The rate bounds.
+        limit : int
+            The limit on the number of returned ruptures.
+        fault_count_limit : Optional[int]
+            The fault count limit on the returned ruptures.
+
+
+        Returns
+        -------
+        dict[int, Rupture]
+            A mapping from rupture id to Rupture object for each rupture satisfying the query parameters.
+        """
+        conn = duckdb.connect(self.db_filepath)
+        sql_query, parameters = query.to_sql(
+            query_str,
+            rate_bounds=rate_bounds,
+            magnitude_bounds=magnitude_bounds,
+            limit=limit,
+            fault_count_limit=fault_count_limit,
+        )
+        ruptures = conn.sql(sql_query, params=parameters).fetchall()
+        return {
+            id: Rupture(
+                rupture_id=id,
+                magnitude=magnitude,
+                area=area,
+                length=length,
+                rate=rate,
+                faults=self.get_rupture_faults(id),
+            )
+            for (id, magnitude, area, length, rate) in ruptures
+        }

@@ -10,8 +10,8 @@ Functions:
 from pathlib import Path
 
 import numpy as np
-from nshmdb.fault import Fault
 from pygmt_helper import plotting
+from source_modelling.sources import Fault
 
 
 def plot_rupture(title: str, faults: list[Fault], output_filepath: Path):
@@ -26,7 +26,7 @@ def plot_rupture(title: str, faults: list[Fault], output_filepath: Path):
     output_filepath : Path
         The filepath to output the figure to.
     """
-    corners = np.vstack([fault.corners() for fault in faults])
+    corners = np.vstack([fault.corners for fault in faults])
     region = (
         corners[:, 1].min() - 0.5,
         corners[:, 1].max() + 0.5,
