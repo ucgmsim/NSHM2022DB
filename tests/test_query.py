@@ -1,4 +1,5 @@
 import pytest
+
 from nshmdb.query import (
     InfixOperator,
     Token,

@@ -31,10 +31,10 @@ from typing import Optional
 
 import duckdb
 import numpy as np
-from qcore import coordinates
-from source_modelling.sources import Fault, Plane
 
 from nshmdb import query
+from qcore import coordinates
+from source_modelling.sources import Fault, Plane
 
 
 @dataclasses.dataclass
@@ -94,6 +94,13 @@ class NSHMDB:
     db_filepath: Path
 
     def __init__(self, db_filepath: Path):
+        """Initialise the NSHMDB instance.
+
+        Parameters
+        ----------
+        db_filepath : Path
+            Path to the SQLite database file.
+        """
         self.db_filepath = db_filepath
 
     def create(self):

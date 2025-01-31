@@ -33,10 +33,10 @@ import pandas as pd
 import shapely
 import typer
 from geojson import FeatureCollection
-from qcore import coordinates
-from source_modelling.sources import Fault, Plane
 
 from nshmdb.nshmdb import NSHMDB
+from qcore import coordinates
+from source_modelling.sources import Fault, Plane
 
 app = typer.Typer()
 
