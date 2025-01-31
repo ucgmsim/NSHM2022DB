@@ -361,7 +361,7 @@ class NSHMDB:
                 (rupture_id,),
             )
             fault_planes = cursor.fetchall()
-            faults = collections.defaultdict(lambda: Fault([]))
+            faults = collections.defaultdict(lambda: [])
             for (
                 _,
                 top_left_lat,
@@ -386,10 +386,10 @@ class NSHMDB:
                         [bottom_left_lat, bottom_left_lon, bottom],
                     ]
                 )
-                faults[parent_name].planes.append(
+                faults[parent_name].append(
                     Plane(coordinates.wgs_depth_to_nztm(corners))
                 )
-            return faults
+            return {name: Fault(planes) for name, planes in faults.items()}
 
     def get_rupture_fault_info(self, rupture_id: int) -> dict[str, FaultInfo]:
         """Get the rupture fault information for a given rupture.
