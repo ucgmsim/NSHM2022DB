@@ -10,6 +10,7 @@ Functions:
 from pathlib import Path
 
 import numpy as np
+
 from pygmt_helper import plotting
 from source_modelling.sources import Fault
 

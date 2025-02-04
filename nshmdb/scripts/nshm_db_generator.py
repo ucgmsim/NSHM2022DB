@@ -30,10 +30,12 @@ from typing import Annotated
 import geojson
 import numpy as np
 import pandas as pd
-import qcore.coordinates
+import shapely
 import typer
 from geojson import FeatureCollection
+
 from nshmdb.nshmdb import NSHMDB
+from qcore import coordinates
 from source_modelling.sources import Fault, Plane
 
 app = typer.Typer()
@@ -65,37 +67,34 @@ def extract_faults_from_info(
     faults = {}
     for i in range(len(fault_info_list.features)):
         fault_feature = fault_info_list[i]
-        fault_trace = list(geojson.utils.coords(fault_feature))
+        fault_trace = shapely.LineString(
+            coordinates.wgs_depth_to_nztm(
+                np.array(list(geojson.utils.coords(fault_feature)))[:, ::-1]
+            )
+        )
+        fault_trace = shapely.simplify(fault_trace, 10)
+        trace_coords = np.array(fault_trace.coords)
         name = fault_feature.properties["FaultName"]
+        bottom = fault_feature.properties["LowDepth"]
         dip_dir = fault_feature.properties["DipDir"]
         dip = fault_feature.properties["DipDeg"]
-        bottom = fault_feature.properties["LowDepth"]
-        if dip == 90:
-            projected_width = 0
-        else:
-            projected_width = bottom / np.tan(np.radians(dip))
         planes = []
-        for i in range(len(fault_trace) - 1):
-            top_left = qcore.coordinates.wgs_depth_to_nztm(
-                np.append(fault_trace[i][::-1], 0)
+        for j in range(len(trace_coords) - 1):
+            top_left = trace_coords[j]
+            top_right = trace_coords[j + 1]
+            planes.append(
+                Plane.from_nztm_trace(
+                    np.array([top_left, top_right]),
+                    0,
+                    bottom,
+                    dip,
+                    coordinates.great_circle_bearing_to_nztm_bearing(
+                        coordinates.nztm_to_wgs_depth(top_left), 1, dip_dir
+                    )
+                    if dip != 90
+                    else 0,
+                ),
             )
-            top_right = qcore.coordinates.wgs_depth_to_nztm(
-                np.append(fault_trace[i + 1][::-1], 0)
-            )
-            dip_dir_direction = (
-                np.array(
-                    [
-                        projected_width * np.cos(np.radians(dip_dir)),
-                        projected_width * np.sin(np.radians(dip_dir)),
-                        bottom,
-                    ]
-                )
-                * 1000
-            )
-            bottom_left = top_left + dip_dir_direction
-            bottom_right = top_right + dip_dir_direction
-            corners = np.array([top_left, top_right, bottom_right, bottom_left])
-            planes.append(Plane(corners))
         faults[name] = Fault(planes)
     return faults
 
@@ -127,9 +126,10 @@ def main(
     db = NSHMDB(sqlite_db_path)
     db.create()
 
-    with zipfile.ZipFile(
-        cru_solutions_zip_path, "r"
-    ) as cru_solutions_zip_file, db.connection() as conn:
+    with (
+        zipfile.ZipFile(cru_solutions_zip_path, "r") as cru_solutions_zip_file,
+        db.connection() as conn,
+    ):
         with cru_solutions_zip_file.open(
             str(FAULT_INFORMATION_PATH)
         ) as fault_info_handle:
@@ -194,13 +194,17 @@ def main(
                 )
 
         if not skip_rupture_creation:
-            with cru_solutions_zip_file.open(
-                str(RUPTURE_FAULT_JOIN_PATH)
-            ) as rupture_fault_join_handle, cru_solutions_zip_file.open(
-                str(RUPTURE_RATES_PATH)
-            ) as rupture_rates_handle, cru_solutions_zip_file.open(
-                str(RUPTURE_PROPERTIES_PATH)
-            ) as rupture_properties_path:
+            with (
+                cru_solutions_zip_file.open(
+                    str(RUPTURE_FAULT_JOIN_PATH)
+                ) as rupture_fault_join_handle,
+                cru_solutions_zip_file.open(
+                    str(RUPTURE_RATES_PATH)
+                ) as rupture_rates_handle,
+                cru_solutions_zip_file.open(
+                    str(RUPTURE_PROPERTIES_PATH)
+                ) as rupture_properties_path,
+            ):
                 rupture_rates = pd.read_csv(rupture_rates_handle).set_index(
                     "Rupture Index"
                 )
