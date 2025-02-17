@@ -27,10 +27,11 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Initialise DuckDB
-        run: python -c "import duckdb; duckdb.sql('INSTALL sqlite')"
+        run: source .venv/bin/activate && python -c "import duckdb; duckdb.sql('INSTALL sqlite')"
 
       - name: Run tests
         run: |
+          source .venv/bin/activate
           pytest --cov=nshmdb --cov-report=html tests
 
       - name: Upload coverage data
