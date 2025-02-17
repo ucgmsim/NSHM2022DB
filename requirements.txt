@@ -1,6 +1,6 @@
 duckdb
 geojson
-numpy<2
+numpy
 pandas
 pygmt_helper @ git+https://github.com/ucgmsim/pygmt_helper.git
 pytest
