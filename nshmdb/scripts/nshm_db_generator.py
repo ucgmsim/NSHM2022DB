@@ -80,9 +80,12 @@ def print_array_diff(arr1: list, arr2: list) -> None:
         if tag == "equal":
             for old, new in zip(arr1[i1:i2], arr2[j1:j2]):
                 new_line.append(f"{new}")
-                old_line.append(f"{old}")  # aligned space
+                old_line.append(f"{old}")
         elif tag == "replace":
-            for old, new in zip(arr1[i1:i2], arr2[j1:j2]):
+            max_len = max(i2 - i1, j2 - j1)
+            for k in range(max_len):
+                old = arr1[i1 + k] if k < i2 - i1 else " " * len(str(arr2[j1 + k]))
+                new = arr2[j1 + k] if k < j2 - j1 else " " * len(str(arr1[i1 + k]))
                 new_line.append(f"{new}")
                 old_line.append(f"{old}")
         elif tag == "delete":
