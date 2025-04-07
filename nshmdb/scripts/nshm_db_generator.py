@@ -72,7 +72,6 @@ def extract_faults_from_info(
                 np.array(list(geojson.utils.coords(fault_feature)))[:, ::-1]
             )
         )
-        fault_trace = shapely.simplify(fault_trace, 10)
         trace_coords = np.array(fault_trace.coords)
         name = fault_feature.properties["FaultName"]
         bottom = fault_feature.properties["LowDepth"]
