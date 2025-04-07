@@ -23,6 +23,8 @@ Example:
     python generate_nshm2022_data.py data/cru_solutions.zip output/nshm2022.sqlite
 """
 
+import copy
+import difflib
 import zipfile
 from pathlib import Path
 from typing import Annotated
@@ -46,6 +48,57 @@ RUPTURE_FAULT_JOIN_PATH = Path("ruptures") / "fast_indices.csv"
 RUPTURE_RATES_PATH = "aggregate_rates.csv"
 RUPTURE_PROPERTIES_PATH = Path("ruptures") / "properties.csv"
 MFDS_PATH = Path("ruptures") / "sub_seismo_on_fault_mfds.csv"
+
+
+def print_array_diff(arr1: list, arr2: list) -> None:
+    """Print the differences between two arrays in a readable format.
+
+    Parameters
+    ----------
+    arr1 : list
+        The first array to compare.
+    arr2 : list
+        The second array to compare.
+
+    Returns
+    -------
+    None
+
+    Example
+    -------
+    >>> arr1 = ["a", "b", "c"]
+    >>> arr2 = ["a", "c"]
+    >>> print_array_diff(arr1, arr2)
+        Old: a  b  c
+        New: a     c
+    """
+    seq_match = difflib.SequenceMatcher(a=arr1, b=arr2)
+    new_line = []
+    old_line = []
+
+    for tag, i1, i2, j1, j2 in seq_match.get_opcodes():
+        if tag == "equal":
+            for old, new in zip(arr1[i1:i2], arr2[j1:j2]):
+                new_line.append(f"{new}")
+                old_line.append(f"{old}")
+        elif tag == "replace":
+            max_len = max(i2 - i1, j2 - j1)
+            for k in range(max_len):
+                old = arr1[i1 + k] if k < i2 - i1 else " " * len(str(arr2[j1 + k]))
+                new = arr2[j1 + k] if k < j2 - j1 else " " * len(str(arr1[i1 + k]))
+                new_line.append(f"{new}")
+                old_line.append(f"{old}")
+        elif tag == "delete":
+            for old in arr1[i1:i2]:
+                new_line.append(" " * len(f"{old}"))
+                old_line.append(f"{old}")
+        elif tag == "insert":
+            for new in arr2[j1:j2]:
+                new_line.append(f"{new}")
+                old_line.append(" " * len(f"{new}"))
+
+    print("Old: " + "  ".join(old_line))
+    print("New: " + "  ".join(new_line))
 
 
 def extract_faults_from_info(
@@ -72,11 +125,20 @@ def extract_faults_from_info(
                 np.array(list(geojson.utils.coords(fault_feature)))[:, ::-1]
             )
         )
+        fault_trace_old = copy.deepcopy(fault_trace)
+        fault_trace = shapely.remove_repeated_points(fault_trace, 0)
         trace_coords = np.array(fault_trace.coords)
         name = fault_feature.properties["FaultName"]
         bottom = fault_feature.properties["LowDepth"]
         dip_dir = fault_feature.properties["DipDir"]
         dip = fault_feature.properties["DipDeg"]
+
+        if not shapely.equals_exact(fault_trace, fault_trace_old):
+            old_trace = list(fault_trace_old.coords)
+            new_trace = list(fault_trace.coords)
+            print(f"Warning: Fault trace for {name} was altered.")
+            print_array_diff(old_trace, new_trace)
+
         planes = []
         for j in range(len(trace_coords) - 1):
             top_left = trace_coords[j]
@@ -240,7 +302,3 @@ def main(
                 rupture_fault_join_df.to_sql(
                     "rupture_faults", conn, index=False, if_exists="append"
                 )
-
-
-if __name__ == "__main__":
-    app()
