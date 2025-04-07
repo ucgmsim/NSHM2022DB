@@ -1,9 +1,20 @@
 from pathlib import Path
 
+import pytest
+
 from nshmdb.nshmdb import NSHMDB
 from nshmdb.scripts import nshm_db_generator
 
 CRU_FAULT_SOLUTIONS = Path("tests") / "CRU_fault_system_solution_small.zip"
+
+
+def test_sequence_differ(capsys: pytest.CaptureFixture):
+    nshm_db_generator.print_array_diff(
+        [1, 2, 3, 4],
+        [1, 2, 5, 6, 7],
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ("Old: 1  2  3  4   \n" + "New: 1  2  5  6  7\n")
 
 
 def test_nshmdb_generator(tmp_path: Path):

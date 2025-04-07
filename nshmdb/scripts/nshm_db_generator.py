@@ -302,7 +302,3 @@ def main(
                 rupture_fault_join_df.to_sql(
                     "rupture_faults", conn, index=False, if_exists="append"
                 )
-
-
-if __name__ == "__main__":
-    app()
