@@ -440,7 +440,21 @@ class NSHMDB:
                 name
                 for (name,) in conn.execute("SELECT name FROM parent_fault").fetchall()
             }
+        
+    def get_fault_ids(self) -> set[int]:
+        """Get the list of fault ids in the database.
 
+        Returns
+        -------
+        set[int]
+            The list of fault ids.
+        """
+        with self.connection() as conn:
+            return {
+                fault_id
+                for (fault_id,) in conn.execute("SELECT fault_id FROM fault").fetchall()
+            }
+        
     def query(
         self,
         query_str: str,
