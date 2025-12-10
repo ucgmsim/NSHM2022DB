@@ -2,9 +2,9 @@ duckdb
 geojson
 numpy
 pandas
-pygmt_helper @ git+https://github.com/ucgmsim/pygmt_helper.git
+pygmt-helper
 pytest
-qcore @ git+https://github.com/ucgmsim/qcore.git
+qcore-utils
 shapely
-source_modelling @ git+https://github.com/ucgmsim/source_modelling.git
+source-modelling
 typer
