@@ -48,7 +48,7 @@ jobs:
 
     environment:
       name: pypi
-      url: https://pypi.org/p/pygmt-helper
+      url: https://pypi.org/p/nshmdb
 
     permissions:
       id-token: write
