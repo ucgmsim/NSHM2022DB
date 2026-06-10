@@ -6,5 +6,5 @@ pygmt-helper
 pytest
 qcore-utils
 shapely
-source-modelling
+source-modelling>=2026.6.2
 typer
