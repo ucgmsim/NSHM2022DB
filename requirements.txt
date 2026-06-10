@@ -1,5 +1,6 @@
 duckdb
 geojson
+numba>=0.63.0
 numpy
 pandas
 pygmt-helper

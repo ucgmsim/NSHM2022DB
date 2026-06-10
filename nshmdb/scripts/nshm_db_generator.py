@@ -18,9 +18,6 @@ Options:
         If flag is set, skip fault creation.
     --skip-rupture-creation : bool, optional
         If flag is set, skip rupture creation.
-
-Example:
-    python generate_nshm2022_data.py data/cru_solutions.zip output/nshm2022.sqlite
 """
 
 import copy
@@ -36,7 +33,7 @@ import shapely
 import typer
 from geojson import FeatureCollection
 
-from nshmdb.nshmdb import NSHMDB
+from nshmdb.nshmdb import NSHMDB, FaultInfo, FaultSystem
 from qcore import coordinates
 from source_modelling.sources import Fault, Plane
 
@@ -102,8 +99,9 @@ def print_array_diff(arr1: list, arr2: list) -> None:
 
 
 def extract_faults_from_info(
+    fault_system: FaultSystem,
     fault_info_list: FeatureCollection,
-) -> dict[str, Fault]:
+) -> list[FaultInfo]:
     """Extract the fault geometry from the fault information description.
 
     Parameters
@@ -129,6 +127,7 @@ def extract_faults_from_info(
         fault_trace = shapely.remove_repeated_points(fault_trace, 0)
         trace_coords = np.array(fault_trace.coords)
         name = fault_feature.properties["FaultName"]
+        top = fault_feature.properties["UpDepth"]
         bottom = fault_feature.properties["LowDepth"]
         dip_dir = fault_feature.properties["DipDir"]
         dip = fault_feature.properties["DipDeg"]
@@ -146,7 +145,7 @@ def extract_faults_from_info(
             planes.append(
                 Plane.from_nztm_trace(
                     np.array([top_left, top_right]),
-                    0,
+                    top,
                     bottom,
                     dip,
                     coordinates.great_circle_bearing_to_nztm_bearing(
@@ -160,12 +159,28 @@ def extract_faults_from_info(
     return faults
 
 
+HIKURANGI_NAME = "Hikurangi, Kermadec to Louisville ridge, 30km - with slip deficit smoothed near East Cape and locked near trench."
+PUYSEGUR_NAME = "Puysegur, 15km, 50% coupling, corrected dip direction"
+
+
+def infer_fault_system(geojson: FeatureCollection) -> FaultSystem:
+    """Infer the fault system from an NSHM 2022 feature collection."""
+    features = geojson.features
+    test_feature = features[0]
+    name = test_feature.properties["ParentName"]
+    if name == HIKURANGI_NAME:
+        return FaultSystem.Hikurangi
+    elif name == PUYSEGUR_NAME:
+        return FaultSystem.Puysegur
+    return FaultSystem.Crustal
+
+
 @app.command()
 def main(
     cru_solutions_zip_path: Annotated[
         Path,
         typer.Argument(
-            help="CRU solutions zip file", readable=True, dir_okay=False, exists=True
+            help="NSHM solutions zip file", readable=True, dir_okay=False, exists=True
         ),
     ],
     sqlite_db_path: Annotated[
@@ -184,60 +199,20 @@ def main(
 ):
     """Generate the NSHM2022 rupture data from a CRU system solution package."""
 
-    db = NSHMDB(sqlite_db_path)
-    db.create()
-
     with (
         zipfile.ZipFile(cru_solutions_zip_path, "r") as cru_solutions_zip_file,
-        db.connection() as conn,
+        NSHMDB(sqlite_db_path) as db,
     ):
         with cru_solutions_zip_file.open(
             str(FAULT_INFORMATION_PATH)
         ) as fault_info_handle:
             faults_info = geojson.load(fault_info_handle)
 
-        faults = extract_faults_from_info(faults_info)
+        fault_system = infer_fault_system(faults_info)
+
+        faults = extract_faults_from_info(fault_system, faults_info)
         if not skip_faults_creation:
-            for i, fault in enumerate(faults.values()):
-                fault_info = faults_info[i]
-                fault_id = fault_info.properties["FaultID"]
-                parent_id = fault_info.properties["ParentID"]
-                fault_name = fault_info.properties["FaultName"]
-                fault_rake = fault_info.properties["Rake"]
-                conn.execute(
-                    """INSERT OR REPLACE INTO parent_fault (parent_id, name) VALUES (?, ?)""",
-                    (parent_id, fault_info.properties["ParentName"]),
-                )
-                conn.execute(
-                    """INSERT OR REPLACE INTO fault (fault_id, name, rake, parent_id) VALUES (?, ?, ?, ?)""",
-                    (fault_id, fault_name, fault_rake, parent_id),
-                )
-                conn.executemany(
-                    """INSERT INTO fault_plane (
-                            top_left_lat,
-                            top_left_lon,
-                            top_right_lat,
-                            top_right_lon,
-                            bottom_right_lat,
-                            bottom_right_lon,
-                            bottom_left_lat,
-                            bottom_left_lon,
-                            top_depth,
-                            bottom_depth,
-                            fault_id
-                        ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                        )""",
-                    [
-                        (
-                            *plane.corners[:, :2].ravel(),
-                            plane.corners[0, 2],
-                            plane.corners[-1, 2],
-                            fault_id,
-                        )
-                        for plane in fault.planes
-                    ],
-                )
+            db.insert_many_faults(faults)
 
         if not skip_mfds_creation:
             with cru_solutions_zip_file.open(str(MFDS_PATH)) as mfds_file_handle:
@@ -302,6 +277,7 @@ def main(
                 rupture_fault_join_df.to_sql(
                     "rupture_faults", conn, index=False, if_exists="append"
                 )
+
 
 if __name__ == "__main__":
     app()
