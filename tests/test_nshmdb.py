@@ -138,10 +138,10 @@ def test_get_fault_info(test_db: NSHMDB):
         "INSERT INTO fault (fault_id, fault_system, nshm_id, rake, parent_id) VALUES (1, 3, 1, 90.0, 1)"
     )
 
-    fault_info = test_db.get_fault_info(FaultSystem.Crustal, 3)
+    fault_info = test_db.get_fault_info(FaultSystem.Crustal, 1)
     assert fault_info == FaultInfo(
         fault_system=FaultSystem.Crustal,
-        fault_id=3,
+        fault_id=1,
         name="Fault A",
         rake=90.0,
         tect_type=None,
