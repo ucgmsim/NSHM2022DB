@@ -3,19 +3,16 @@ name: Deptry Dependency Check
 on: [pull_request]
 
 jobs:
-  test:
+  dependencies:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Setup the minimum required python distribution
       - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      # Install deptry
-      - run: pip install deptry
-      # Workaround for deptry not liking pyproject + requirements.txt
-      - run: sed -i -e '/pytest/d' -e '/hypothesis/d' -e '/diffimg/d' requirements.txt
-      - run: rm pyproject.toml
-      - run: pip install -r requirements.txt
-      # Run deptry to check that all dependencies are present.
-      - run: deptry .
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install GMT
+        run: sudo apt-get update && sudo apt-get install -y gmt libgmt-dev ghostscript gdal-bin libgdal-dev
+
+      - run: uv run --all-groups deptry .

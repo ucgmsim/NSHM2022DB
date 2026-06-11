@@ -24,6 +24,20 @@ dependencies = [
     "typer>=0.26.7",
 ]
 
+[dependency-groups]
+test = [
+  "pytest",
+  "pytest-cov",
+  "coverage[toml]",
+]
+types = [
+  "types-shapely",
+  "pandas-stubs",
+  "ty",
+]
+dev = ["ruff", "deptry", "ty", "numpydoc"]
+
+
 [tool.setuptools_scm]
 
 [project.scripts]
