@@ -1,24 +1,11 @@
 """
 Module to interact with the NSHMDB (National Seismic Hazard Model Database).
 
-This module provides classes and functions to interact with an SQLite database
-containing national seismic hazard model data. It includes functionalities to
-insert fault and rupture data into the database, as well as retrieve fault
-information associated with ruptures.
+Use the `NSHMDB` context manager to open a database connection and query
+fault and rupture data.
 
-Classes
--------
-NSHMDB
-    Class for interacting with the NSHMDB database.
-
-Usage
------
-Initialize an instance of NSHMDB with the path to the SQLite database file.
-Use the methods of the NSHMDB class to interact with fault and rupture data
-in the database.
-
->>> db = NSHMDB('path/to/nshm.db')
->>> db.get_rupture_faults(0) # Should return two faults in this rupture.
+>>> with NSHMDB('path/to/nshm.db') as db:
+...     faults = db.get_rupture_faults(1)
 """
 
 import collections
@@ -30,6 +17,7 @@ from dataclasses import field
 from enum import IntEnum, auto
 from pathlib import Path
 from sqlite3 import Connection
+from types import TracebackType
 from typing import Optional, Self
 
 import duckdb
@@ -109,30 +97,45 @@ class NSHMDB(contextlib.AbstractContextManager):
         self.db_filepath = db_filepath
         self._conn = None
 
-    def create(self):
-        """Create the tables for the NSHMDB database."""
+    def create(self) -> None:
+        """Create the tables for the NSHMDB database.
+
+        Safe to call on an existing database; all statements use
+        ``CREATE TABLE IF NOT EXISTS``.
+        """
         schema_traversable = importlib.resources.files("nshmdb.schema") / "schema.sql"
         with importlib.resources.as_file(schema_traversable) as schema_path:
             with open(schema_path, "r", encoding="utf-8") as schema_file_handle:
                 schema = schema_file_handle.read()
-        self.connection().executescript(schema)
+        conn = self._conn or sqlite3.connect(self.db_filepath)
+        conn.executescript(schema)
+        if self._conn is None:
+            conn.close()
 
     def connect(self) -> None:
+        """Open the database connection and create the schema if needed."""
         if not self._conn:
             self._conn = sqlite3.connect(self.db_filepath)
             self.create()
 
     def close(self) -> None:
+        """Close the database connection."""
         if self._conn:
             self._conn.close()
         self._conn = None
 
     def __enter__(self) -> Self:
+        """Open the database connection."""
         self.connect()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
-        _ = exc_type, exc_value, traceback
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the database connection."""
         self.close()
 
     def connection(self) -> Connection:
@@ -151,7 +154,8 @@ class NSHMDB(contextlib.AbstractContextManager):
 
     def add_rupture(
         self,
-        rupture_id: int,
+        fault_system: FaultSystem,
+        nshm_id: int,
         magnitude: float,
         area: float,
         length: float,
@@ -161,10 +165,10 @@ class NSHMDB(contextlib.AbstractContextManager):
 
         Parameters
         ----------
-        conn : Connection
-            The SQLite db connection.
-        rupture_id : int
-            The rupture id.
+        fault_system : FaultSystem
+            The fault system of the rupture.
+        nshm_id : int
+            The NSHM rupture id.
         magnitude : float
             The magnitude of the rupture.
         area : float
@@ -175,8 +179,8 @@ class NSHMDB(contextlib.AbstractContextManager):
             The rupture rate.
         """
         self.connection().execute(
-            "INSERT INTO rupture (rupture_id, magnitude, area, len, rate) VALUES (?, ?, ?, ?, ?)",
-            (rupture_id, magnitude, area, length, rate),
+            "INSERT INTO rupture (fault_system, nshm_id, magnitude, area, len, rate) VALUES (?, ?, ?, ?, ?, ?)",
+            (fault_system, nshm_id, magnitude, area, length, rate),
         )
 
     def most_likely_fault(
@@ -218,7 +222,7 @@ class NSHMDB(contextlib.AbstractContextManager):
                 """SELECT DISTINCT mfd.magnitude
         FROM magnitude_frequency_distribution mfd
         JOIN rupture_faults rf ON rf.fault_id = mfd.fault_id
-        WHERE rf.nshm_id = ?
+        WHERE rf.rupture_id = ?
         ORDER BY mfd.magnitude""",
                 (rupture_id,),
             ).fetchall()
@@ -236,7 +240,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         JOIN fault f ON f.parent_id = pf.parent_id
         JOIN rupture_faults rf ON rf.fault_id = f.fault_id
         JOIN magnitude_frequency_distribution mfd ON mfd.fault_id = f.fault_id
-        WHERE rf.nshm_id = ? AND
+        WHERE rf.rupture_id = ? AND
         ("""
             + " OR ".join(
                 ["pf.name = ? AND mfd.magnitude = ?"] * len(parent_fault_magnitudes)
@@ -257,28 +261,33 @@ class NSHMDB(contextlib.AbstractContextManager):
             segment_name: cumulative_rate for segment_name, cumulative_rate in rates
         }
 
-    def add_fault_to_rupture(self, rupture_id: int, fault_id: int):
-        """Insert rupture data into the database.
+    def add_fault_to_rupture(self, rupture_id: int, fault_id: int) -> None:
+        """Link a fault to an existing rupture in the database.
 
         Parameters
         ----------
-        conn : Connection
-            The db connection object.
         rupture_id : int
-            ID of the rupture.
-        fault_ids : list[int]
-            List of faults involved in the rupture.
+            Internal ID of the rupture (must already exist).
+        fault_id : int
+            Internal ID of the fault to link.
         """
         conn = self.connection()
-        conn.execute(
-            "INSERT OR IGNORE INTO rupture (rupture_id) VALUES (?)", (rupture_id,)
-        )
         conn.execute(
             "INSERT INTO rupture_faults (rupture_id, fault_id) VALUES (?, ?)",
             (rupture_id, fault_id),
         )
 
     def insert_many_faults(self, faults: list[FaultInfo]) -> None:
+        """Bulk-insert fault definitions into the database.
+
+        Parent fault records are upserted from the fault names; fault plane
+        geometry stored on each ``FaultInfo.fault`` is also inserted.
+
+        Parameters
+        ----------
+        faults : list[FaultInfo]
+            The fault definitions to insert.
+        """
         cursor = self.connection().cursor()
 
         cursor.executemany(
@@ -291,7 +300,6 @@ class NSHMDB(contextlib.AbstractContextManager):
         cursor.execute("SELECT MAX(fault_id) FROM fault")
         max_id = cursor.fetchone()[0]
         next_fault_idx = max_id + 1 if max_id is not None else 0
-        fault_tuples = []
 
         cursor.executemany(
             "INSERT INTO fault (fault_id, fault_system, nshm_id, rake, tect_type, parent_id) VALUES (?, ?, ?, ?, ?, ?)",
@@ -358,6 +366,17 @@ class NSHMDB(contextlib.AbstractContextManager):
     def insert_many_ruptures(
         self, ruptures: pd.DataFrame, rupture_faults: pd.DataFrame
     ) -> None:
+        """Bulk-insert rupture data and their fault associations.
+
+        Parameters
+        ----------
+        ruptures : pd.DataFrame
+            DataFrame indexed by NSHM rupture id with columns
+            ``magnitude``, ``area``, ``len``, ``rate``, and ``fault_system``.
+        rupture_faults : pd.DataFrame
+            DataFrame with columns ``rupture_id`` (NSHM rupture id),
+            ``fault_id`` (NSHM fault id), and ``fault_system``.
+        """
         conn = self.connection()
         ruptures.to_sql(
             "rupture", conn, index=True, index_label="nshm_id", if_exists="append"
@@ -391,7 +410,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         """
         conn = self.connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * from fault_plane where nshm_id = ?", (fault_id,))
+        cursor.execute("SELECT * from fault_plane where fault_id = ?", (fault_id,))
         planes = []
         for (
             _,
@@ -424,8 +443,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         Parameters
         ----------
         fault_id : int
-            The fault id to retreive info for.
-
+            The internal fault id (primary key).
 
         Returns
         -------
@@ -434,10 +452,26 @@ class NSHMDB(contextlib.AbstractContextManager):
         """
         conn = self.connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * from fault where nshm_id = ?", (fault_id,))
+        cursor.execute(
+            """
+            SELECT f.fault_system, f.fault_id, p.name, f.rake, f.tect_type
+            FROM fault f
+            JOIN parent_fault p ON f.parent_id = p.parent_id
+            WHERE f.fault_id = ?
+            """,
+            (fault_id,),
+        )
         return FaultInfo(*cursor.fetchone(), fault=None)
 
     def insert_magnitude_frequency_distribution(self, mfds: pd.DataFrame) -> None:
+        """Bulk-insert magnitude frequency distribution entries.
+
+        Parameters
+        ----------
+        mfds : pd.DataFrame
+            DataFrame with columns ``nshm_id``, ``fault_system``,
+            ``magnitude``, and ``rate``.
+        """
         mfds = mfds.rename(columns=dict(nshm_id="fault_nshm_id"))
         mfds = self._nshm_id_to_fault_id(mfds)
         mfds[["fault_id", "magnitude", "rate"]].to_sql(
@@ -561,7 +595,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT p.name, f.*
+            SELECT p.name, f.fault_system, f.fault_id, p.name, f.rake, f.tect_type
             FROM fault f
             JOIN rupture_faults rf on f.fault_id = rf.fault_id
             JOIN parent_fault p ON f.parent_id = p.parent_id
@@ -570,7 +604,7 @@ class NSHMDB(contextlib.AbstractContextManager):
             (rupture_id,),
         )
         fault_rows = cursor.fetchall()
-        return {row[0]: FaultInfo(*row[1:]) for row in fault_rows}
+        return {row[0]: FaultInfo(*row[1:], fault=None) for row in fault_rows}
 
     def get_fault_names(self) -> set[str]:
         """Get the list of fault names in the database.

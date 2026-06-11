@@ -51,11 +51,17 @@ MFDS_PATH = Path("ruptures") / "sub_seismo_on_fault_mfds.csv"
 
 
 def print_array_diff(arr1: list, arr2: list) -> None:
+    """Print a rich side-by-side diff of two lists to the console.
+
+    Parameters
+    ----------
+    arr1 : list
+        The original list.
+    arr2 : list
+        The updated list.
+    """
     console = Console()
     seq_match = difflib.SequenceMatcher(a=arr1, b=arr2)
-
-    table = Table(show_header=True, header_style="bold magenta")
-    table.add_column("Segment")
 
     old_row = ["Old"]
     new_row = ["New"]
@@ -80,6 +86,16 @@ def print_array_diff(arr1: list, arr2: list) -> None:
             for val in arr2[j1:j2]:
                 old_row.append("")
                 new_row.append(f"[green]{val}[/green]")
+
+    # Pad rows to the same length before adding columns.
+    max_len = max(len(old_row), len(new_row))
+    old_row.extend([""] * (max_len - len(old_row)))
+    new_row.extend([""] * (max_len - len(new_row)))
+
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("")
+    for i in range(max_len - 1):
+        table.add_column(str(i + 1))
 
     table.add_row(*old_row)
     table.add_row(*new_row)
@@ -178,6 +194,17 @@ def infer_fault_system(geojson: FeatureCollection) -> FaultSystem:
 def populate_mfds_table(
     db: NSHMDB, solutions_zip_file: ZipFile, fault_system: FaultSystem
 ) -> None:
+    """Populate the magnitude frequency distribution table from a solutions zip.
+
+    Parameters
+    ----------
+    db : NSHMDB
+        Open database connection.
+    solutions_zip_file : ZipFile
+        The NSHM solutions zip archive.
+    fault_system : FaultSystem
+        The fault system the MFDs belong to.
+    """
     with solutions_zip_file.open(str(MFDS_PATH)) as mfds_file_handle:
         mfds = pd.read_csv(mfds_file_handle)
         mfds = mfds.rename(columns={"Section Index": "nshm_id"})
@@ -190,6 +217,17 @@ def populate_mfds_table(
 def populate_rupture_table(
     db: NSHMDB, solutions_zip_file: ZipFile, fault_system: FaultSystem
 ) -> None:
+    """Populate the rupture and rupture_faults tables from a solutions zip.
+
+    Parameters
+    ----------
+    db : NSHMDB
+        Open database connection.
+    solutions_zip_file : ZipFile
+        The NSHM solutions zip archive.
+    fault_system : FaultSystem
+        The fault system the ruptures belong to.
+    """
     with (
         solutions_zip_file.open(
             str(RUPTURE_FAULT_JOIN_PATH)

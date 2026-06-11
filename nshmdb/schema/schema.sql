@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS rupture_faults (
     rupture_id INTEGER NOT NULL,
     fault_id INTEGER NOT NULL,
     UNIQUE(rupture_id, fault_id),
-    FOREIGN KEY(fault_id) REFERENCES fault(fault_id)
+    FOREIGN KEY(fault_id) REFERENCES fault(fault_id),
     FOREIGN KEY(rupture_id) REFERENCES rupture(rupture_id)
 );
 
