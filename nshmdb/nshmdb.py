@@ -222,7 +222,8 @@ class NSHMDB(contextlib.AbstractContextManager):
                 """SELECT DISTINCT mfd.magnitude
         FROM magnitude_frequency_distribution mfd
         JOIN rupture_faults rf ON rf.fault_id = mfd.fault_id
-        WHERE rf.rupture_id = ?
+        JOIN rupture r ON r.rupture_id = rf.rupture_id
+        WHERE r.nshm_id = ?
         ORDER BY mfd.magnitude""",
                 (rupture_id,),
             ).fetchall()
@@ -239,8 +240,9 @@ class NSHMDB(contextlib.AbstractContextManager):
         FROM parent_fault pf
         JOIN fault f ON f.parent_id = pf.parent_id
         JOIN rupture_faults rf ON rf.fault_id = f.fault_id
+        JOIN rupture r ON r.rupture_id = rf.rupture_id
         JOIN magnitude_frequency_distribution mfd ON mfd.fault_id = f.fault_id
-        WHERE rf.rupture_id = ? AND
+        WHERE r.nshm_id = ? AND
         ("""
             + " OR ".join(
                 ["pf.name = ? AND mfd.magnitude = ?"] * len(parent_fault_magnitudes)
@@ -410,7 +412,12 @@ class NSHMDB(contextlib.AbstractContextManager):
         """
         conn = self.connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * from fault_plane where fault_id = ?", (fault_id,))
+        cursor.execute(
+            """SELECT fp.* FROM fault_plane fp
+            JOIN fault f ON fp.fault_id = f.fault_id
+            WHERE f.nshm_id = ?""",
+            (fault_id,),
+        )
         planes = []
         for (
             _,
@@ -443,7 +450,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         Parameters
         ----------
         fault_id : int
-            The internal fault id (primary key).
+            The NSHM fault id.
 
         Returns
         -------
@@ -454,10 +461,10 @@ class NSHMDB(contextlib.AbstractContextManager):
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT f.fault_system, f.fault_id, p.name, f.rake, f.tect_type
+            SELECT f.fault_system, f.nshm_id, p.name, f.rake, f.tect_type
             FROM fault f
             JOIN parent_fault p ON f.parent_id = p.parent_id
-            WHERE f.fault_id = ?
+            WHERE f.nshm_id = ?
             """,
             (fault_id,),
         )
@@ -595,11 +602,12 @@ class NSHMDB(contextlib.AbstractContextManager):
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT p.name, f.fault_system, f.fault_id, p.name, f.rake, f.tect_type
+            SELECT p.name, f.fault_system, f.nshm_id, p.name, f.rake, f.tect_type
             FROM fault f
             JOIN rupture_faults rf on f.fault_id = rf.fault_id
+            JOIN rupture r ON r.rupture_id = rf.rupture_id
             JOIN parent_fault p ON f.parent_id = p.parent_id
-            WHERE rf.rupture_id = ?
+            WHERE r.nshm_id = ?
             """,
             (rupture_id,),
         )
@@ -630,7 +638,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         conn = self.connection()
         return {
             fault_id
-            for (fault_id,) in conn.execute("SELECT fault_id FROM fault").fetchall()
+            for (fault_id,) in conn.execute("SELECT nshm_id FROM fault").fetchall()
         }
 
     def query(
@@ -675,14 +683,14 @@ class NSHMDB(contextlib.AbstractContextManager):
             )
             ruptures = conn.sql(sql_query, params=parameters).fetchall()
             return {
-                id: Rupture(
-                    rupture_id=id,
+                nshm_id: Rupture(
+                    rupture_id=nshm_id,
                     fault_system=fault_system,
                     magnitude=magnitude,
                     area=area,
                     length=length,
                     rate=rate,
-                    faults=self.get_rupture_faults(id),
+                    faults=self.get_rupture_faults(internal_id),
                 )
-                for (id, fault_system, magnitude, area, length, rate) in ruptures
+                for (internal_id, nshm_id, fault_system, magnitude, area, length, rate) in ruptures
             }

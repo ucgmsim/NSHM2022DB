@@ -316,7 +316,7 @@ def to_sql(
         parameters.append(fault_count_limit)
 
     sql_expression = f"""SELECT
-     rupture.rupture_id, ANY_VALUE(rupture.fault_system), ANY_VALUE(rupture.magnitude), ANY_VALUE(rupture.area), ANY_VALUE(rupture.len), ANY_VALUE(rupture.rate)
+     rupture.rupture_id, ANY_VALUE(rupture.nshm_id), ANY_VALUE(rupture.fault_system), ANY_VALUE(rupture.magnitude), ANY_VALUE(rupture.area), ANY_VALUE(rupture.len), ANY_VALUE(rupture.rate)
     FROM rupture
     JOIN
         rupture_faults ON rupture.rupture_id = rupture_faults.rupture_id
