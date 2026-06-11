@@ -25,6 +25,7 @@ import difflib
 import zipfile
 from pathlib import Path
 from typing import Annotated
+from zipfile import ZipFile
 
 import geojson
 import numpy as np
@@ -174,10 +175,8 @@ def infer_fault_system(geojson: FeatureCollection) -> FaultSystem:
     return FaultSystem.Crustal
 
 
-def populate_mfds_table(
-    cru_solutions_zip_file: ZipFile, fault_system: FaultSystem
-) -> None:
-    with cru_solutions_zip_file.open(str(MFDS_PATH)) as mfds_file_handle:
+def populate_mfds_table(solutions_zip_file: ZipFile, fault_system: FaultSystem) -> None:
+    with solutions_zip_file.open(str(MFDS_PATH)) as mfds_file_handle:
         mfds = pd.read_csv(mfds_file_handle)
         mfds = mfds.rename(columns={"Section Index": "nshm_id"})
         mfds = mfds.melt(id_vars=["nshm_id"], var_name="magnitude", value_name="rate")
@@ -187,14 +186,14 @@ def populate_mfds_table(
 
 
 def populate_rupture_table(
-    cru_solutions_zip_file: ZipFile, fault_system: FaultSystem
+    solutions_zip_file: ZipFile, fault_system: FaultSystem
 ) -> None:
     with (
-        cru_solutions_zip_file.open(
+        solutions_zip_file.open(
             str(RUPTURE_FAULT_JOIN_PATH)
         ) as rupture_fault_join_handle,
-        cru_solutions_zip_file.open(str(RUPTURE_RATES_PATH)) as rupture_rates_handle,
-        cru_solutions_zip_file.open(
+        solutions_zip_file.open(str(RUPTURE_RATES_PATH)) as rupture_rates_handle,
+        solutions_zip_file.open(
             str(RUPTURE_PROPERTIES_PATH)
         ) as rupture_properties_path,
     ):
@@ -250,12 +249,10 @@ def main(
     """Generate the NSHM2022 rupture data from a CRU system solution package."""
 
     with (
-        zipfile.ZipFile(cru_solutions_zip_path, "r") as cru_solutions_zip_file,
+        zipfile.ZipFile(cru_solutions_zip_path, "r") as solutions_zip_file,
         NSHMDB(sqlite_db_path) as db,
     ):
-        with cru_solutions_zip_file.open(
-            str(FAULT_INFORMATION_PATH)
-        ) as fault_info_handle:
+        with solutions_zip_file.open(str(FAULT_INFORMATION_PATH)) as fault_info_handle:
             faults_info = geojson.load(fault_info_handle)
 
         fault_system = infer_fault_system(faults_info)
@@ -266,7 +263,7 @@ def main(
             db.insert_many_faults(faults)
 
         if not skip_mfds_creation:
-            populate_mfds_table(cru_solutions_zip_file, fault_system)
+            populate_mfds_table(solutions_zip_file, fault_system)
 
         if not skip_rupture_creation:
-            populate_rupture_table(cru_solutions_zip_file, fault_system)
+            populate_rupture_table(solutions_zip_file, fault_system)

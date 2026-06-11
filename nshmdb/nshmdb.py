@@ -30,12 +30,11 @@ from dataclasses import field
 from enum import IntEnum, auto
 from pathlib import Path
 from sqlite3 import Connection
-from typing import Optional, Self, TypeVar
+from typing import Optional, Self
 
 import duckdb
 import numpy as np
 import pandas as pd
-from numba import NonexistentTargetError
 
 from nshmdb import query
 from qcore import coordinates
@@ -55,7 +54,7 @@ class Rupture:
     """A rupture from the database."""
 
     fault_system: FaultSystem
-    nshm_id: int
+    rupture_id: int
 
     magnitude: float
     """The rupture magnitude (note: this is not the moment magnitude)"""
@@ -470,7 +469,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         ).fetchone()
 
         return Rupture(
-            nshm_id=nshm_id,
+            rupture_id=nshm_id,
             fault_system=FaultSystem(fault_system),
             magnitude=magnitude,
             area=area,
