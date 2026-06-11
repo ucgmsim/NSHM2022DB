@@ -175,7 +175,9 @@ def infer_fault_system(geojson: FeatureCollection) -> FaultSystem:
     return FaultSystem.Crustal
 
 
-def populate_mfds_table(solutions_zip_file: ZipFile, fault_system: FaultSystem) -> None:
+def populate_mfds_table(
+    db: NSHMDB, solutions_zip_file: ZipFile, fault_system: FaultSystem
+) -> None:
     with solutions_zip_file.open(str(MFDS_PATH)) as mfds_file_handle:
         mfds = pd.read_csv(mfds_file_handle)
         mfds = mfds.rename(columns={"Section Index": "nshm_id"})
@@ -186,7 +188,7 @@ def populate_mfds_table(solutions_zip_file: ZipFile, fault_system: FaultSystem) 
 
 
 def populate_rupture_table(
-    solutions_zip_file: ZipFile, fault_system: FaultSystem
+    db: NSHMDB, solutions_zip_file: ZipFile, fault_system: FaultSystem
 ) -> None:
     with (
         solutions_zip_file.open(
@@ -263,7 +265,7 @@ def main(
             db.insert_many_faults(faults)
 
         if not skip_mfds_creation:
-            populate_mfds_table(solutions_zip_file, fault_system)
+            populate_mfds_table(db, solutions_zip_file, fault_system)
 
         if not skip_rupture_creation:
-            populate_rupture_table(solutions_zip_file, fault_system)
+            populate_rupture_table(db, solutions_zip_file, fault_system)
