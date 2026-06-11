@@ -1,4 +1,6 @@
+import codecs
 import copy
+import csv
 import zipfile
 from collections.abc import Generator, Iterable
 from dataclasses import dataclass
@@ -10,6 +12,7 @@ from zipfile import ZipFile
 import geojson
 import numpy as np
 import pandas as pd
+import pyproj
 import requests
 import shapely
 from geojson.feature import FeatureCollection
@@ -125,7 +128,7 @@ def _download_nshm_solution(url: str) -> ZipFile:
 
 
 FAULT_INFORMATION_PATH = PurePath("ruptures") / "fault_sections.geojson"
-RUPTURE_FAULT_JOIN_PATH = PurePath("ruptures") / "fast_indices.csv"
+RUPTURE_FAULT_JOIN_PATH = PurePath("ruptures") / "indices.csv"
 RUPTURE_RATES_PATH = PurePath("solution") / "rates.csv"
 RUPTURE_PROPERTIES_PATH = PurePath("ruptures") / "properties.csv"
 MFDS_PATH = PurePath("ruptures") / "sub_seismo_on_fault_mfds.csv"
@@ -146,6 +149,12 @@ def infer_fault_system(geojson: FeatureCollection) -> FaultSystem:
     return FaultSystem.Crustal
 
 
+def _infer_dip_direction(start: np.ndarray, end: np.ndarray) -> float:
+    geod = pyproj.Geod(ellps="WGS84")
+    strike_direction, _, _ = geod.inv(start[0], start[1], end[0], end[1])
+    return strike_direction + 90
+
+
 def _extract_faults_from_info(
     fault_info_list: FeatureCollection,
 ) -> list[FaultInfo]:
@@ -164,12 +173,12 @@ def _extract_faults_from_info(
     """
     fault_system = infer_fault_system(fault_info_list)
     faults = []
+
     for i in range(len(fault_info_list.features)):
         fault_feature = fault_info_list[i]
+        wgs_coords = list(geojson.utils.coords(fault_feature))
         fault_trace = shapely.LineString(
-            coordinates.wgs_depth_to_nztm(
-                np.array(list(geojson.utils.coords(fault_feature)))[:, ::-1]
-            )[:, :2]
+            coordinates.wgs_depth_to_nztm(np.array(wgs_coords)[:, ::-1])[:, :2]
         )
 
         fault_trace_old = copy.deepcopy(fault_trace)
@@ -179,12 +188,15 @@ def _extract_faults_from_info(
         name = fault_feature.properties["ParentName"]
         top = fault_feature.properties["UpDepth"]
         bottom = fault_feature.properties["LowDepth"]
-        dip_dir = fault_feature.properties["DipDir"]
+        dip_dir = fault_feature.properties.get("DipDir")
         dip = fault_feature.properties["DipDeg"]
         rake = fault_feature.properties["Rake"]
 
         if not shapely.equals_exact(fault_trace, fault_trace_old):
             print(f"Warning: Fault trace for {name} was altered.")
+
+        if dip_dir is None:
+            dip_dir = _infer_dip_direction(wgs_coords[0], wgs_coords[1])
 
         planes = []
         for j in range(len(trace_coords) - 1):
@@ -196,13 +208,10 @@ def _extract_faults_from_info(
                     top,
                     bottom,
                     dip,
-                    coordinates.great_circle_bearing_to_nztm_bearing(
-                        coordinates.nztm_to_wgs_depth(top_left), 1, dip_dir
-                    )
-                    if dip != 90
-                    else 0,
+                    dip_dir=dip_dir if dip != 90 else 0,
                 ),
             )
+
         faults.append(
             FaultInfo(
                 fault_id=fault_id,
@@ -259,14 +268,24 @@ def _extract_ruptures(solution: ZipFile) -> pd.DataFrame:
         return rupture_properties
 
 
+def _read_ruptures(handle: Iterable[str]) -> Generator[tuple[int, int], None, None]:
+    # Could do this with pandas DataFrame + melt but this stops the large crustal solutions blowing up memory.
+    reader = csv.reader(handle)
+    # Skip header
+    _ = next(reader)
+    for row in reader:
+        rupture_index = int(row[0])
+        num_segments = int(row[1])
+        for segment in row[2 : 2 + num_segments]:
+            yield (rupture_index, int(segment))
+
+
 def _extract_rupture_join_table(solution: ZipFile) -> pd.DataFrame:
     with solution.open(str(RUPTURE_FAULT_JOIN_PATH)) as rupture_fault_join_handle:
-        rupture_fault_join_df = pd.read_csv(rupture_fault_join_handle)
-        rupture_fault_join_df["section"] = rupture_fault_join_df["section"].astype(
-            "Int64"
-        )
-        rupture_fault_join_df = rupture_fault_join_df.rename(
-            columns={"section": "fault_id", "rupture": "rupture_id"}
+        rupture_fault_join_df = pd.DataFrame(
+            # Using codecs.iterdecode here stops the entire CSV buffering in memory.
+            _read_ruptures(codecs.iterdecode(rupture_fault_join_handle, "utf-8")),
+            columns=["rupture_id", "fault_id"],
         )
         return rupture_fault_join_df
 
@@ -350,7 +369,6 @@ def download_composite_solution(
     api_key: str, solution_version: SolutionVersion
 ) -> NSHMSolution:
     ids = _get_grouped_source_ids(api_key, solution_version)
-    print(ids)
     weighted_solutions = []
     for solution_ids in ids.values():
         if not ids:
@@ -358,7 +376,6 @@ def download_composite_solution(
         weighted_solution = _aggregate_solutions(
             _solution_stream(api_key, solution_ids)
         )
-        print(weighted_solution)
         weighted_solutions.append(weighted_solution)
 
     return _concatenate_solutions(weighted_solutions)
