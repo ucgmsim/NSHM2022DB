@@ -136,6 +136,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         traceback: TracebackType | None,
     ) -> None:
         """Close the database connection."""
+        _ = exc_type, exc_value, traceback
         self.close()
 
     def connection(self) -> Connection:
@@ -151,37 +152,6 @@ class NSHMDB(contextlib.AbstractContextManager):
             )
 
         return self._conn
-
-    def add_rupture(
-        self,
-        fault_system: FaultSystem,
-        nshm_id: int,
-        magnitude: float,
-        area: float,
-        length: float,
-        rate: float,
-    ) -> None:
-        """Add a rupture into the database.
-
-        Parameters
-        ----------
-        fault_system : FaultSystem
-            The fault system of the rupture.
-        nshm_id : int
-            The NSHM rupture id.
-        magnitude : float
-            The magnitude of the rupture.
-        area : float
-            The area of the rupture.
-        length : float
-            The length of the rupture.
-        rate : float
-            The rupture rate.
-        """
-        self.connection().execute(
-            "INSERT INTO rupture (fault_system, nshm_id, magnitude, area, len, rate) VALUES (?, ?, ?, ?, ?, ?)",
-            (fault_system, nshm_id, magnitude, area, length, rate),
-        )
 
     def most_likely_fault(
         self, rupture_id: int, parent_fault_magnitudes: dict[str, float]
@@ -262,22 +232,6 @@ class NSHMDB(contextlib.AbstractContextManager):
         return {
             segment_name: cumulative_rate for segment_name, cumulative_rate in rates
         }
-
-    def add_fault_to_rupture(self, rupture_id: int, fault_id: int) -> None:
-        """Link a fault to an existing rupture in the database.
-
-        Parameters
-        ----------
-        rupture_id : int
-            Internal ID of the rupture (must already exist).
-        fault_id : int
-            Internal ID of the fault to link.
-        """
-        conn = self.connection()
-        conn.execute(
-            "INSERT INTO rupture_faults (rupture_id, fault_id) VALUES (?, ?)",
-            (rupture_id, fault_id),
-        )
 
     def insert_many_faults(self, faults: list[FaultInfo]) -> None:
         """Bulk-insert fault definitions into the database.
@@ -444,7 +398,7 @@ class NSHMDB(contextlib.AbstractContextManager):
             planes.append(Plane(coordinates.wgs_depth_to_nztm(corners)))
         return Fault(planes)
 
-    def get_fault_info(self, fault_id: int) -> FaultInfo:
+    def get_fault_info(self, fault_system: FaultSystem, fault_id: int) -> FaultInfo:
         """Get the fault information for a given fault id.
 
         Parameters
@@ -464,11 +418,16 @@ class NSHMDB(contextlib.AbstractContextManager):
             SELECT f.fault_system, f.nshm_id, p.name, f.rake, f.tect_type
             FROM fault f
             JOIN parent_fault p ON f.parent_id = p.parent_id
-            WHERE f.nshm_id = ?
+            WHERE f.fault_system = ? AND f.nshm_id = ?
             """,
-            (fault_id,),
+            (fault_system, fault_id),
         )
-        return FaultInfo(*cursor.fetchone(), fault=None)
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError(
+                f"Could not find fault with id = {fault_id} in fault system = {fault_system}"
+            )
+        return FaultInfo(*row, fault=None)
 
     def insert_magnitude_frequency_distribution(self, mfds: pd.DataFrame) -> None:
         """Bulk-insert magnitude frequency distribution entries.
@@ -692,5 +651,13 @@ class NSHMDB(contextlib.AbstractContextManager):
                     rate=rate,
                     faults=self.get_rupture_faults(internal_id),
                 )
-                for (internal_id, nshm_id, fault_system, magnitude, area, length, rate) in ruptures
+                for (
+                    internal_id,
+                    nshm_id,
+                    fault_system,
+                    magnitude,
+                    area,
+                    length,
+                    rate,
+                ) in ruptures
             }

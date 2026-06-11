@@ -30,30 +30,6 @@ def alpine_fault_nshmdb(test_db: NSHMDB) -> NSHMDB:
     return test_db
 
 
-def test_add_rupture(test_db: NSHMDB):
-    """Test adding a rupture to the database."""
-    test_db.add_rupture(FaultSystem.Crustal, 1, 6.5, 25.0, 10.0, 0.01)
-    result = test_db.connection().execute(
-        "SELECT fault_system, nshm_id, magnitude, area, len, rate FROM rupture WHERE nshm_id = 1"
-    ).fetchone()
-    assert result == (FaultSystem.Crustal, 1, 6.5, 25.0, 10.0, 0.01)
-
-
-def test_add_fault_to_rupture(test_db: NSHMDB):
-    """Test adding a fault to a rupture."""
-    conn = test_db.connection()
-    conn.execute("INSERT INTO parent_fault (parent_id, name) VALUES (1, 'Fault A')")
-    conn.execute(
-        "INSERT INTO fault (fault_id, fault_system, nshm_id, rake, parent_id) VALUES (1, 3, 1, 90.0, 1)"
-    )
-    test_db.add_rupture(FaultSystem.Crustal, 1, 6.5, 25.0, 10.0, 0.01)
-    test_db.add_fault_to_rupture(1, 1)
-    result = conn.execute(
-        "SELECT rupture_id, fault_id FROM rupture_faults WHERE fault_id = 1"
-    ).fetchone()
-    assert result == (1, 1)
-
-
 def test_get_rupture(test_db: NSHMDB):
     """Test retrieving a rupture."""
     test_db.connection().execute(
@@ -162,10 +138,10 @@ def test_get_fault_info(test_db: NSHMDB):
         "INSERT INTO fault (fault_id, fault_system, nshm_id, rake, parent_id) VALUES (1, 3, 1, 90.0, 1)"
     )
 
-    fault_info = test_db.get_fault_info(1)
+    fault_info = test_db.get_fault_info(FaultSystem.Crustal, 3)
     assert fault_info == FaultInfo(
         fault_system=FaultSystem.Crustal,
-        fault_id=1,
+        fault_id=3,
         name="Fault A",
         rake=90.0,
         tect_type=None,
