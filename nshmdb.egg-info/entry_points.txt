@@ -1,2 +1,0 @@
-[console_scripts]
-nshmdb = nshmdb.scripts.nshm_db_generator:app
