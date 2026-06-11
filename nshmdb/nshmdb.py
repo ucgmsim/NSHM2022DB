@@ -123,7 +123,8 @@ class NSHMDB(contextlib.AbstractContextManager):
             self.create()
 
     def close(self) -> None:
-        self._conn.close()
+        if self._conn:
+            self._conn.close()
         self._conn = None
 
     def __enter__(self) -> Self:
@@ -642,11 +643,12 @@ class NSHMDB(contextlib.AbstractContextManager):
             return {
                 id: Rupture(
                     rupture_id=id,
+                    fault_system=fault_system,
                     magnitude=magnitude,
                     area=area,
                     length=length,
                     rate=rate,
                     faults=self.get_rupture_faults(id),
                 )
-                for (id, magnitude, area, length, rate) in ruptures
+                for (id, fault_system, magnitude, area, length, rate) in ruptures
             }
