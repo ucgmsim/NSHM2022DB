@@ -15,8 +15,8 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Install GMT
-        run: sudo apt-get update && sudo apt-get install -y gmt libgmt-dev ghostscript
+      - name: Install GMT and GDAL
+        run: sudo apt-get update && sudo apt-get install -y gmt libgmt-dev ghostscript gdal-bin libgdal-dev
 
       - name: Define a cache dependency glob
         uses: astral-sh/setup-uv@v5

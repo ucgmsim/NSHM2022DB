@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS rupture_faults (
     rupture_id INTEGER NOT NULL,
     fault_id INTEGER NOT NULL,
     UNIQUE(rupture_id, fault_id),
-    FOREIGN KEY(fault_id) REFERENCES fault(fault_id)
+    FOREIGN KEY(fault_id) REFERENCES fault(fault_id),
     FOREIGN KEY(rupture_id) REFERENCES rupture(rupture_id)
 );
 
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS magnitude_frequency_distribution (
     fault_id INTEGER NOT NULL,
     magnitude REAL NOT NULL,
     rate REAL NOT NULL,
-    UNIQUE(fault_id, magnitude)
+    UNIQUE(fault_id, magnitude),
     FOREIGN KEY(fault_id) REFERENCES fault(fault_id)
 );
 
