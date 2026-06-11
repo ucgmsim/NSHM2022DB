@@ -16,6 +16,7 @@ dependencies = [
     "pandas>=3.0.3",
     "pygmt-helper>=2026.2.1",
     "qcore-utils>=2025.12.2",
+    "requests>=2.34.2",
     "rich>=15.0.0",
     "shapely>=2.1.2",
     "source-modelling>=2026.6.2",
