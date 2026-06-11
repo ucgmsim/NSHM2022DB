@@ -8,16 +8,13 @@ CREATE TABLE IF NOT EXISTS fault (
     tect_type INT,
     parent_id INTEGER NOT NULL,
     
-    FOREIGN KEY(parent_id) REFERENCES parent_fault(parent_id)
+    FOREIGN KEY(parent_id) REFERENCES parent_fault(parent_id),
     UNIQUE(fault_system, nshm_id)    
 );
 
 CREATE TABLE IF NOT EXISTS parent_fault (
     parent_id INTEGER PRIMARY KEY NOT NULL,
-
-    name TEXT NOT NULL,
-    
-    UNIQUE(fault_system, nshm_id)
+    name TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS fault_plane (
@@ -45,8 +42,7 @@ CREATE TABLE IF NOT EXISTS rupture (
     area REAL,
     magnitude REAL,
     len REAL,
-    rate REAL
-    -- Maybe I'll add some extra tables here?
+    rate REAL,
 
     UNIQUE(fault_system, nshm_id)
 );
@@ -55,7 +51,7 @@ CREATE TABLE IF NOT EXISTS rupture_faults (
     rupture_fault_id INTEGER PRIMARY KEY,
     rupture_id INTEGER NOT NULL,
     fault_id INTEGER NOT NULL,
-    UNIQUE(rupture_id, fault_id)
+    UNIQUE(rupture_id, fault_id),
     FOREIGN KEY(fault_id) REFERENCES fault(fault_id)
     FOREIGN KEY(rupture_id) REFERENCES rupture(rupture_id)
 );
@@ -71,6 +67,5 @@ CREATE TABLE IF NOT EXISTS magnitude_frequency_distribution (
 
 CREATE INDEX IF NOT EXISTS fault_parent_id_index on fault (parent_id);
 CREATE INDEX IF NOT EXISTS fault_id_index on fault_plane (fault_id);
-CREATE UNIQUE INDEX IF NOT EXISTS rupture_faults_index on rupture_faults (rupture_id, fault_id);
 CREATE INDEX IF NOT EXISTS rupture_rate_index on rupture (rate);
 CREATE UNIQUE INDEX IF NOT EXISTS magnitude_frequency_distribution_index on magnitude_frequency_distribution (fault_id, magnitude);

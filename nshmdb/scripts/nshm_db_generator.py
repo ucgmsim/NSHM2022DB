@@ -32,6 +32,8 @@ import pandas as pd
 import shapely
 import typer
 from geojson import FeatureCollection
+from rich.console import Console
+from rich.table import Table
 
 from nshmdb.nshmdb import NSHMDB, FaultInfo, FaultSystem
 from qcore import coordinates
@@ -48,54 +50,40 @@ MFDS_PATH = Path("ruptures") / "sub_seismo_on_fault_mfds.csv"
 
 
 def print_array_diff(arr1: list, arr2: list) -> None:
-    """Print the differences between two arrays in a readable format.
-
-    Parameters
-    ----------
-    arr1 : list
-        The first array to compare.
-    arr2 : list
-        The second array to compare.
-
-    Returns
-    -------
-    None
-
-    Example
-    -------
-    >>> arr1 = ["a", "b", "c"]
-    >>> arr2 = ["a", "c"]
-    >>> print_array_diff(arr1, arr2)
-        Old: a  b  c
-        New: a     c
-    """
+    console = Console()
     seq_match = difflib.SequenceMatcher(a=arr1, b=arr2)
-    new_line = []
-    old_line = []
+
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Segment")
+
+    old_row = ["Old"]
+    new_row = ["New"]
 
     for tag, i1, i2, j1, j2 in seq_match.get_opcodes():
         if tag == "equal":
-            for old, new in zip(arr1[i1:i2], arr2[j1:j2]):
-                new_line.append(f"{new}")
-                old_line.append(f"{old}")
+            for val in arr1[i1:i2]:
+                old_row.append(str(val))
+                new_row.append(str(val))
         elif tag == "replace":
-            max_len = max(i2 - i1, j2 - j1)
-            for k in range(max_len):
-                old = arr1[i1 + k] if k < i2 - i1 else " " * len(str(arr2[j1 + k]))
-                new = arr2[j1 + k] if k < j2 - j1 else " " * len(str(arr1[i1 + k]))
-                new_line.append(f"{new}")
-                old_line.append(f"{old}")
+            # Highlight replacements
+            for i in range(max(i2 - i1, j2 - j1)):
+                old_val = str(arr1[i1 + i]) if i < (i2 - i1) else ""
+                new_val = str(arr2[j1 + i]) if i < (j2 - j1) else ""
+                old_row.append(f"[red]{old_val}[/red]")
+                new_row.append(f"[green]{new_val}[/green]")
         elif tag == "delete":
-            for old in arr1[i1:i2]:
-                new_line.append(" " * len(f"{old}"))
-                old_line.append(f"{old}")
+            for val in arr1[i1:i2]:
+                old_row.append(f"[red]{val}[/red]")
+                new_row.append("")
         elif tag == "insert":
-            for new in arr2[j1:j2]:
-                new_line.append(f"{new}")
-                old_line.append(" " * len(f"{new}"))
+            for val in arr2[j1:j2]:
+                old_row.append("")
+                new_row.append(f"[green]{val}[/green]")
 
-    print("Old: " + "  ".join(old_line))
-    print("New: " + "  ".join(new_line))
+    table.add_row(*old_row)
+    table.add_row(*new_row)
+
+    console.print(table)
 
 
 def extract_faults_from_info(
@@ -115,7 +103,7 @@ def extract_faults_from_info(
         A dictionary of extracted faults. The key is the name of the
         fault.
     """
-    faults = {}
+    faults = []
     for i in range(len(fault_info_list.features)):
         fault_feature = fault_info_list[i]
         fault_trace = shapely.LineString(
@@ -126,11 +114,13 @@ def extract_faults_from_info(
         fault_trace_old = copy.deepcopy(fault_trace)
         fault_trace = shapely.remove_repeated_points(fault_trace, 0)
         trace_coords = np.array(fault_trace.coords)
-        name = fault_feature.properties["FaultName"]
+        fault_id = fault_feature.properties["FaultID"]
+        name = fault_feature.properties["ParentName"]
         top = fault_feature.properties["UpDepth"]
         bottom = fault_feature.properties["LowDepth"]
         dip_dir = fault_feature.properties["DipDir"]
         dip = fault_feature.properties["DipDeg"]
+        rake = fault_feature.properties["Rake"]
 
         if not shapely.equals_exact(fault_trace, fault_trace_old):
             old_trace = list(fault_trace_old.coords)
@@ -155,7 +145,16 @@ def extract_faults_from_info(
                     else 0,
                 ),
             )
-        faults[name] = Fault(planes)
+        faults.append(
+            FaultInfo(
+                fault_id=fault_id,
+                fault_system=fault_system,
+                name=name,
+                rake=rake,
+                tect_type=None,
+                fault=Fault(planes),
+            )
+        )
     return faults
 
 
@@ -173,6 +172,57 @@ def infer_fault_system(geojson: FeatureCollection) -> FaultSystem:
     elif name == PUYSEGUR_NAME:
         return FaultSystem.Puysegur
     return FaultSystem.Crustal
+
+
+def populate_mfds_table(
+    cru_solutions_zip_file: ZipFile, fault_system: FaultSystem
+) -> None:
+    with cru_solutions_zip_file.open(str(MFDS_PATH)) as mfds_file_handle:
+        mfds = pd.read_csv(mfds_file_handle)
+        mfds = mfds.rename(columns={"Section Index": "nshm_id"})
+        mfds = mfds.melt(id_vars=["nshm_id"], var_name="magnitude", value_name="rate")
+        mfds = mfds[mfds["rate"] > 0]
+        mfds["fault_system"] = fault_system
+        db.insert_magnitude_frequency_distribution(mfds)
+
+
+def populate_rupture_table(
+    cru_solutions_zip_file: ZipFile, fault_system: FaultSystem
+) -> None:
+    with (
+        cru_solutions_zip_file.open(
+            str(RUPTURE_FAULT_JOIN_PATH)
+        ) as rupture_fault_join_handle,
+        cru_solutions_zip_file.open(str(RUPTURE_RATES_PATH)) as rupture_rates_handle,
+        cru_solutions_zip_file.open(
+            str(RUPTURE_PROPERTIES_PATH)
+        ) as rupture_properties_path,
+    ):
+        rupture_rates = pd.read_csv(rupture_rates_handle).set_index("Rupture Index")
+        rupture_properties = pd.read_csv(rupture_properties_path).set_index(
+            "Rupture Index"
+        )
+        rupture_properties = rupture_properties.join(rupture_rates)
+        rupture_properties = rupture_properties.rename(
+            columns={
+                "Magnitude": "magnitude",
+                "Area (m^2)": "area",
+                "Length (m)": "len",
+                "rate_weighted_mean": "rate",
+            }
+        )
+        rupture_properties = rupture_properties[["magnitude", "area", "len", "rate"]]
+        rupture_properties["fault_system"] = fault_system
+
+        rupture_fault_join_df = pd.read_csv(rupture_fault_join_handle)
+        rupture_fault_join_df["section"] = rupture_fault_join_df["section"].astype(
+            "Int64"
+        )
+        rupture_fault_join_df = rupture_fault_join_df.rename(
+            columns={"section": "fault_id", "rupture": "rupture_id"}
+        )
+        rupture_fault_join_df["fault_system"] = fault_system
+        db.insert_many_ruptures(rupture_properties, rupture_fault_join_df)
 
 
 @app.command()
@@ -211,73 +261,12 @@ def main(
         fault_system = infer_fault_system(faults_info)
 
         faults = extract_faults_from_info(fault_system, faults_info)
+
         if not skip_faults_creation:
             db.insert_many_faults(faults)
 
         if not skip_mfds_creation:
-            with cru_solutions_zip_file.open(str(MFDS_PATH)) as mfds_file_handle:
-                mfds = pd.read_csv(mfds_file_handle)
-                mfds = mfds.rename(columns={"Section Index": "fault_id"})
-                mfds = mfds.melt(
-                    id_vars=["fault_id"], var_name="magnitude", value_name="rate"
-                )
-                mfds = mfds[mfds["rate"] > 0]
-                mfds.to_sql(
-                    "magnitude_frequency_distribution",
-                    conn,
-                    index=False,
-                    if_exists="append",
-                )
+            populate_mfds_table(cru_solutions_zip_file, fault_system)
 
         if not skip_rupture_creation:
-            with (
-                cru_solutions_zip_file.open(
-                    str(RUPTURE_FAULT_JOIN_PATH)
-                ) as rupture_fault_join_handle,
-                cru_solutions_zip_file.open(
-                    str(RUPTURE_RATES_PATH)
-                ) as rupture_rates_handle,
-                cru_solutions_zip_file.open(
-                    str(RUPTURE_PROPERTIES_PATH)
-                ) as rupture_properties_path,
-            ):
-                rupture_rates = pd.read_csv(rupture_rates_handle).set_index(
-                    "Rupture Index"
-                )
-                rupture_properties = pd.read_csv(rupture_properties_path).set_index(
-                    "Rupture Index"
-                )
-                rupture_properties = rupture_properties.join(rupture_rates)
-                rupture_properties = rupture_properties.rename(
-                    columns={
-                        "Magnitude": "magnitude",
-                        "Area (m^2)": "area",
-                        "Length (m)": "len",
-                        "rate_weighted_mean": "rate",
-                    }
-                )
-                rupture_properties = rupture_properties[
-                    ["magnitude", "area", "len", "rate"]
-                ]
-                rupture_properties.to_sql(
-                    "rupture",
-                    conn,
-                    index=True,
-                    index_label="rupture_id",
-                    if_exists="append",
-                )
-
-                rupture_fault_join_df = pd.read_csv(rupture_fault_join_handle)
-                rupture_fault_join_df["section"] = rupture_fault_join_df[
-                    "section"
-                ].astype("Int64")
-                rupture_fault_join_df = rupture_fault_join_df.rename(
-                    columns={"section": "fault_id", "rupture": "rupture_id"}
-                )
-                rupture_fault_join_df.to_sql(
-                    "rupture_faults", conn, index=False, if_exists="append"
-                )
-
-
-if __name__ == "__main__":
-    app()
+            populate_rupture_table(cru_solutions_zip_file, fault_system)

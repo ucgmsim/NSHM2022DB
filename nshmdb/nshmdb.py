@@ -26,7 +26,8 @@ import contextlib
 import dataclasses
 import importlib.resources
 import sqlite3
-from enum import Enum, auto
+from dataclasses import field
+from enum import IntEnum, auto
 from pathlib import Path
 from sqlite3 import Connection
 from typing import Optional, Self, TypeVar
@@ -41,7 +42,7 @@ from qcore import coordinates
 from source_modelling.sources import Fault, Plane
 
 
-class FaultSystem(Enum):
+class FaultSystem(IntEnum):
     """NSHM Fault systems"""
 
     Hikurangi = auto()
@@ -54,7 +55,7 @@ class Rupture:
     """A rupture from the database."""
 
     fault_system: FaultSystem
-    rupture_id: int
+    nshm_id: int
 
     magnitude: float
     """The rupture magnitude (note: this is not the moment magnitude)"""
@@ -87,7 +88,7 @@ class FaultInfo:
     fault: Fault | None = None
 
 
-class NSHMDB(contextlib.AbstractAsyncContextManager):
+class NSHMDB(contextlib.AbstractContextManager):
     """Class for interacting with the NSHMDB database.
 
     Parameters
@@ -115,18 +116,24 @@ class NSHMDB(contextlib.AbstractAsyncContextManager):
         with importlib.resources.as_file(schema_traversable) as schema_path:
             with open(schema_path, "r", encoding="utf-8") as schema_file_handle:
                 schema = schema_file_handle.read()
-        self.connection.executescript(schema)
+        self.connection().executescript(schema)
 
-    def __enter__(self) -> Self:
+    def connect(self) -> None:
         if not self._conn:
             self._conn = sqlite3.connect(self.db_filepath)
             self.create()
 
+    def close(self) -> None:
+        self._conn.close()
+        self._conn = None
+
+    def __enter__(self) -> Self:
+        self.connect()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         _ = exc_type, exc_value, traceback
-        self._conn.close()
+        self.close()
 
     def connection(self) -> Connection:
         """Establish a connection to the SQLite database.
@@ -211,7 +218,7 @@ class NSHMDB(contextlib.AbstractAsyncContextManager):
                 """SELECT DISTINCT mfd.magnitude
         FROM magnitude_frequency_distribution mfd
         JOIN rupture_faults rf ON rf.fault_id = mfd.fault_id
-        WHERE rf.rupture_id = ?
+        WHERE rf.nshm_id = ?
         ORDER BY mfd.magnitude""",
                 (rupture_id,),
             ).fetchall()
@@ -229,7 +236,7 @@ class NSHMDB(contextlib.AbstractAsyncContextManager):
         JOIN fault f ON f.parent_id = pf.parent_id
         JOIN rupture_faults rf ON rf.fault_id = f.fault_id
         JOIN magnitude_frequency_distribution mfd ON mfd.fault_id = f.fault_id
-        WHERE rf.rupture_id = ? AND
+        WHERE rf.nshm_id = ? AND
         ("""
             + " OR ".join(
                 ["pf.name = ? AND mfd.magnitude = ?"] * len(parent_fault_magnitudes)
@@ -273,6 +280,7 @@ class NSHMDB(contextlib.AbstractAsyncContextManager):
 
     def insert_many_faults(self, faults: list[FaultInfo]) -> None:
         cursor = self.connection().cursor()
+
         cursor.executemany(
             "INSERT OR IGNORE INTO parent_fault (name) VALUES (?)",
             ((fault.name,) for fault in faults),
@@ -280,12 +288,13 @@ class NSHMDB(contextlib.AbstractAsyncContextManager):
         cursor.execute("SELECT name, parent_id FROM parent_fault")
         parent_id_map = dict(cursor.fetchall())
 
-        cursor.execute("SELECT MAX(fault_id) FROM faults")
-        next_fault_idx = cursor.fetchone()[0] + 1
+        cursor.execute("SELECT MAX(fault_id) FROM fault")
+        max_id = cursor.fetchone()[0]
+        next_fault_idx = max_id + 1 if max_id is not None else 0
         fault_tuples = []
 
         cursor.executemany(
-            "INSERT INTO fault (fault_id, fault_system, nshm_id, rake, tect_type, parent_id) VALUES (?, ?, ?)",
+            "INSERT INTO fault (fault_id, fault_system, nshm_id, rake, tect_type, parent_id) VALUES (?, ?, ?, ?, ?, ?)",
             (
                 (
                     next_fault_idx + i,
@@ -306,7 +315,7 @@ class NSHMDB(contextlib.AbstractAsyncContextManager):
             fault_idx = next_fault_idx + i
             for plane in f.fault.planes:
                 coords = plane.corners[:, :2].ravel()
-                plane_tuples.append((*cords, plane.top_m, plane.bottom_m, f.fault_id))
+                plane_tuples.append((*coords, plane.top_m, plane.bottom_m, fault_idx))
 
         if plane_tuples:
             cursor.executemany(
@@ -320,7 +329,52 @@ class NSHMDB(contextlib.AbstractAsyncContextManager):
                 plane_tuples,
             )
 
-        cursor.commit()
+        cursor.close()
+        self.connection().commit()
+
+    def _nshm_id_to_fault_id(self, nshm_ids: pd.DataFrame) -> pd.DataFrame:
+        conn = self.connection()
+        fault_id_map = pd.read_sql_query(
+            "SELECT fault_system, nshm_id, fault_id FROM fault",
+            conn,
+        )
+        fault_id_map = fault_id_map.rename(columns=dict(nshm_id="fault_nshm_id"))
+        return nshm_ids.merge(
+            fault_id_map, on=["fault_system", "fault_nshm_id"], how="left"
+        )
+
+    def _nshm_id_to_rupture_id(self, nshm_ids: pd.DataFrame) -> pd.DataFrame:
+        conn = self.connection()
+        rupture_id_map = pd.read_sql_query(
+            "SELECT fault_system, nshm_id, rupture_id FROM rupture",
+            conn,
+        )
+        rupture_id_map = rupture_id_map.rename(columns=dict(nshm_id="rupture_nshm_id"))
+
+        return nshm_ids.merge(
+            rupture_id_map, on=["fault_system", "rupture_nshm_id"], how="left"
+        )
+
+    def insert_many_ruptures(
+        self, ruptures: pd.DataFrame, rupture_faults: pd.DataFrame
+    ) -> None:
+        conn = self.connection()
+        ruptures.to_sql(
+            "rupture", conn, index=True, index_label="nshm_id", if_exists="append"
+        )
+
+        rupture_faults = rupture_faults.rename(
+            columns=dict(rupture_id="rupture_nshm_id", fault_id="fault_nshm_id")
+        )
+
+        df_joined = self._nshm_id_to_rupture_id(rupture_faults)
+        df_joined = self._nshm_id_to_fault_id(df_joined)
+
+        rupture_join_table = df_joined[["rupture_id", "fault_id"]]
+
+        rupture_join_table.to_sql(
+            "rupture_faults", conn, index=False, if_exists="append"
+        )
 
     def get_fault(self, fault_id: int) -> Fault:
         """Get a specific fault definition from a database.
@@ -383,14 +437,25 @@ class NSHMDB(contextlib.AbstractAsyncContextManager):
         cursor.execute("SELECT * from fault where nshm_id = ?", (fault_id,))
         return FaultInfo(*cursor.fetchone(), fault=None)
 
-    def get_rupture(self, nshm_id: int) -> Rupture:
+    def insert_magnitude_frequency_distribution(self, mfds: pd.DataFrame) -> None:
+        mfds = mfds.rename(columns=dict(nshm_id="fault_nshm_id"))
+        mfds = self._nshm_id_to_fault_id(mfds)
+        mfds[["fault_id", "magnitude", "rate"]].to_sql(
+            "magnitude_frequency_distribution",
+            self.connection(),
+            index=False,
+            if_exists="append",
+        )
+
+    def get_rupture(self, fault_system: FaultSystem, nshm_id: int) -> Rupture:
         """Retrieve a rupture from the database.
 
         Parameters
         ----------
-        rupture_id : int
+        fault_system : FaultSystem
+            The fault system of the rupture.
+        nshm_id : int
             The rupture to retrieve.
-
 
         Returns
         -------
@@ -400,12 +465,13 @@ class NSHMDB(contextlib.AbstractAsyncContextManager):
         conn = self.connection()
         cursor = conn.cursor()
         (rupture_id, magnitude, area, length, rate) = cursor.execute(
-            "SELECT rupture_id, magnitude, area, len, rate FROM rupture WHERE nshm_id = ?",
-            (nshm_id,),
+            "SELECT rupture_id, magnitude, area, len, rate FROM rupture WHERE nshm_id = ? AND fault_system = ?",
+            (nshm_id, fault_system),
         ).fetchone()
 
         return Rupture(
-            rupture_id=rupture_id,
+            nshm_id=nshm_id,
+            fault_system=FaultSystem(fault_system),
             magnitude=magnitude,
             area=area,
             length=length,
@@ -429,7 +495,7 @@ class NSHMDB(contextlib.AbstractAsyncContextManager):
         conn = self.connection()
         cursor = conn.cursor()
         cursor.execute(
-            """SELECT fs.*, p.parent_id, p.name
+            """SELECT fs.*, f.fault_id, f.fault_system, p.parent_id, p.name
             FROM fault_plane fs
             JOIN rupture_faults rf ON fs.fault_id = rf.fault_id
             JOIN fault f ON fs.fault_id = f.fault_id
@@ -453,6 +519,8 @@ class NSHMDB(contextlib.AbstractAsyncContextManager):
             top,
             bottom,
             _,
+            fault_id,
+            fault_system,
             parent_id,
             parent_name,
         ) in fault_planes:
@@ -464,7 +532,15 @@ class NSHMDB(contextlib.AbstractAsyncContextManager):
                     [bottom_left_lat, bottom_left_lon, bottom],
                 ]
             )
-            faults[parent_name].append(Plane(coordinates.wgs_depth_to_nztm(corners)))
+            # HACK: Geometries are only connected in the crustal setting. This
+            # will be addressed by fault planarisation for subduction sources at
+            # a later date.
+            fault_name = (
+                parent_name
+                if fault_system == FaultSystem.Crustal
+                else f"{parent_name}: Section {fault_id}"
+            )
+            faults[fault_name].append(Plane(coordinates.wgs_depth_to_nztm(corners)))
         return {name: Fault(planes) for name, planes in faults.items()}
 
     def get_rupture_fault_info(self, rupture_id: int) -> dict[str, FaultInfo]:
