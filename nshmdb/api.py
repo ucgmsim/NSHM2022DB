@@ -1,9 +1,11 @@
 import copy
-from collections.abc import Iterable
+import zipfile
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from io import BytesIO
+from pathlib import PurePath
 from typing import Any, Self
-from zipfile import Path, ZipFile
+from zipfile import ZipFile
 
 import geojson
 import numpy as np
@@ -30,9 +32,9 @@ def format_solution(version: SolutionVersion) -> str:
     return f"NSHM_v{major}.{minor}.{patch}"
 
 
-def get_grouped_source_ids(
+def _get_grouped_source_ids(
     api_key: str, version: SolutionVersion
-) -> dict[str, list[str]]:
+) -> dict[str, list[tuple[float, str]]]:
     """
     Step 1: Fetches logic tree data and groups inversion IDs by source type.
     Returns a dictionary like {'CRU': ['id1', 'id2'], 'HIK': ['id3']}
@@ -44,6 +46,7 @@ def get_grouped_source_ids(
               branch_sets {
                 short_name
                 branches {
+                  weight
                   sources {
                     __typename
                     ... on BranchInversionSource {
@@ -79,15 +82,16 @@ def get_grouped_source_ids(
             source_ids[short_name] = []
 
         for branch in branch_set.get("branches", []):
+            weight = branch["weight"]
             for source in branch.get("sources", []):
                 inversion_id = source.get("inversion_id")
                 if inversion_id and inversion_id not in source_ids[short_name]:
-                    source_ids[short_name].append(inversion_id)
+                    source_ids[short_name].append((weight, inversion_id))
 
     return source_ids
 
 
-def get_solution_download_link(api_key: str, node_id: str) -> str | None:
+def _get_solution_download_link(api_key: str, node_id: str) -> str:
     """
     Step 2: Uses the InversionSolutionQuery to get the file_url and file_name
     for a specific node ID.
@@ -109,8 +113,10 @@ def get_solution_download_link(api_key: str, node_id: str) -> str | None:
     data = response.json()
 
     node = data.get("data", {}).get("node", {})
-
-    return node.get("file_url")
+    url = node.get("file_url")
+    if not url:
+        raise ValueError(f"Invalid solution id: {node_id}")
+    return url
 
 
 def _download_nshm_solution(url: str) -> ZipFile:
@@ -118,11 +124,11 @@ def _download_nshm_solution(url: str) -> ZipFile:
         return ZipFile(BytesIO(f.content), "r")
 
 
-FAULT_INFORMATION_PATH = Path("ruptures") / "fault_sections.geojson"
-RUPTURE_FAULT_JOIN_PATH = Path("ruptures") / "fast_indices.csv"
-RUPTURE_RATES_PATH = Path("solution") / "rates.csv"
-RUPTURE_PROPERTIES_PATH = Path("ruptures") / "properties.csv"
-MFDS_PATH = Path("ruptures") / "sub_seismo_on_fault_mfds.csv"
+FAULT_INFORMATION_PATH = PurePath("ruptures") / "fault_sections.geojson"
+RUPTURE_FAULT_JOIN_PATH = PurePath("ruptures") / "fast_indices.csv"
+RUPTURE_RATES_PATH = PurePath("solution") / "rates.csv"
+RUPTURE_PROPERTIES_PATH = PurePath("ruptures") / "properties.csv"
+MFDS_PATH = PurePath("ruptures") / "sub_seismo_on_fault_mfds.csv"
 
 HIKURANGI_NAME = "Hikurangi, Kermadec to Louisville ridge, 30km - with slip deficit smoothed near East Cape and locked near trench."
 PUYSEGUR_NAME = "Puysegur, 15km, 50% coupling, corrected dip direction"
@@ -163,8 +169,9 @@ def _extract_faults_from_info(
         fault_trace = shapely.LineString(
             coordinates.wgs_depth_to_nztm(
                 np.array(list(geojson.utils.coords(fault_feature)))[:, ::-1]
-            )
+            )[:, :2]
         )
+
         fault_trace_old = copy.deepcopy(fault_trace)
         fault_trace = shapely.remove_repeated_points(fault_trace, 0)
         trace_coords = np.array(fault_trace.coords)
@@ -209,8 +216,13 @@ def _extract_faults_from_info(
     return faults
 
 
-def _extract_mfds(solution: ZipFile) -> pd.DataFrame:
-    with solution.open(str(MFDS_PATH)) as mfds_file_handle:
+def _extract_mfds(solution: ZipFile) -> pd.DataFrame | None:
+    mfds_handle_path = zipfile.Path(solution) / MFDS_PATH
+
+    if not mfds_handle_path.exists():
+        return None
+
+    with mfds_handle_path.open() as mfds_file_handle:
         mfds = pd.read_csv(mfds_file_handle)
         mfds = mfds.rename(columns={"Section Index": "nshm_id"})
         mfds = mfds.melt(id_vars=["nshm_id"], var_name="magnitude", value_name="rate")
@@ -261,7 +273,7 @@ def _extract_rupture_join_table(solution: ZipFile) -> pd.DataFrame:
 
 @dataclass
 class NSHMSolution:
-    magnitude_frequency_distribution: pd.DataFrame
+    magnitude_frequency_distribution: pd.DataFrame | None
     rupture_join_table: pd.DataFrame
     rupture_properties: pd.DataFrame
     faults: list[FaultInfo]
@@ -276,7 +288,7 @@ class NSHMSolution:
         )
 
 
-def aggregate_solutions(
+def _aggregate_solutions(
     solutions: Iterable[tuple[float, ZipFile]],
 ) -> NSHMSolution:
     composite_solution = None
@@ -295,7 +307,7 @@ def aggregate_solutions(
     return composite_solution
 
 
-def concatenate_solutions(solutions: list[NSHMSolution]) -> NSHMSolution:
+def _concatenate_solutions(solutions: list[NSHMSolution]) -> NSHMSolution:
     mfds = []
     rupture_join_tables = []
     rupture_properties = []
@@ -305,8 +317,9 @@ def concatenate_solutions(solutions: list[NSHMSolution]) -> NSHMSolution:
         faults.extend(solution.faults)
 
         mfd = solution.magnitude_frequency_distribution
-        mfd["fault_system"] = fault_system
-        mfds.append(mfd)
+        if mfd:
+            mfd["fault_system"] = fault_system
+            mfds.append(mfd)
 
         rupture_join_table = solution.rupture_join_table
         rupture_join_table["fault_system"] = fault_system
@@ -318,7 +331,34 @@ def concatenate_solutions(solutions: list[NSHMSolution]) -> NSHMSolution:
 
     return NSHMSolution(
         faults=faults,
-        magnitude_frequency_distribution=pd.concat(mfds),
+        magnitude_frequency_distribution=pd.concat(mfds) if mfds else None,
         rupture_join_table=pd.concat(rupture_join_tables),
         rupture_properties=pd.concat(rupture_properties),
     )
+
+
+def _solution_stream(
+    api_key: str, solution_ids: list[tuple[float, str]]
+) -> Generator[tuple[float, ZipFile], None, None]:
+    for weight, id in solution_ids:
+        url = _get_solution_download_link(api_key, id)
+        file = _download_nshm_solution(url)
+        yield (weight, file)
+
+
+def download_composite_solution(
+    api_key: str, solution_version: SolutionVersion
+) -> NSHMSolution:
+    ids = _get_grouped_source_ids(api_key, solution_version)
+    print(ids)
+    weighted_solutions = []
+    for solution_ids in ids.values():
+        if not ids:
+            continue
+        weighted_solution = _aggregate_solutions(
+            _solution_stream(api_key, solution_ids)
+        )
+        print(weighted_solution)
+        weighted_solutions.append(weighted_solution)
+
+    return _concatenate_solutions(weighted_solutions)
