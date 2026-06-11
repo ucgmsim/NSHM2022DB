@@ -115,8 +115,10 @@ class NSHMDB(contextlib.AbstractContextManager):
     def connect(self) -> None:
         """Open the database connection and create the schema if needed."""
         if not self._conn:
+            exists = self.db_filepath.exists()
             self._conn = sqlite3.connect(self.db_filepath)
-            self.create()
+            if not exists:
+                self.create()
 
     def close(self) -> None:
         """Close the database connection."""
@@ -136,7 +138,10 @@ class NSHMDB(contextlib.AbstractContextManager):
         traceback: TracebackType | None,
     ) -> None:
         """Close the database connection."""
-        _ = exc_type, exc_value, traceback
+        _ = exc_value, traceback
+        if exc_type is None and self._conn is not None:
+            self._conn.commit()
+
         self.close()
 
     def connection(self) -> Connection:
