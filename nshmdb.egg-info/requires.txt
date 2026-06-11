@@ -1,0 +1,10 @@
+duckdb>=1.5.3
+geojson>=3.3.0
+numpy>=2.4.6
+pandas>=3.0.3
+pygmt-helper>=2026.2.1
+qcore-utils>=2025.12.2
+rich>=15.0.0
+shapely>=2.1.2
+source-modelling>=2026.6.2
+typer>=0.26.7
