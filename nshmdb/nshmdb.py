@@ -86,15 +86,15 @@ class NSHMDB(contextlib.AbstractContextManager):
 
     db_filepath: Path
 
-    def __init__(self, db_filepath: Path):
+    def __init__(self, db_filepath: Path | str):
         """Initialise the NSHMDB instance.
 
         Parameters
         ----------
-        db_filepath : Path
-            Path to the SQLite database file.
+        db_filepath : Path | str
+            Path to the SQLite database filep.
         """
-        self.db_filepath = db_filepath
+        self.db_filepath = Path(db_filepath)
         self._conn = None
 
     def create(self) -> None:
