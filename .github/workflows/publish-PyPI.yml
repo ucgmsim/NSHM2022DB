@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Git tag to checkout and publish'
+        description: "Git tag to checkout and publish"
         required: false
         type: string
 
@@ -43,7 +43,7 @@ jobs:
   publish-to-pypi:
     name: Publish to PyPI
     needs:
-    - build
+      - build
     runs-on: ubuntu-latest
 
     environment:
@@ -54,10 +54,42 @@ jobs:
       id-token: write
 
     steps:
-    - name: Download all the dists
-      uses: actions/download-artifact@v4
-      with:
-        name: python-package-distributions
-        path: dist/
-    - name: Publish distribution to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Download all the dists
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  post-publish:
+    name: Post-Publish build database
+    needs: [publish-to-pypi]
+    runs-on: ubuntu-latest
+    env:
+      NSHMDB_VERSION: ${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}
+      NSHM_VERSION: 1.0.4
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the package
+        run: pip install nshmdb==${{ env.NSHMDB_VERSION }}
+
+      - name: Generate Database
+        run: |
+          uv run nshmdb ${{ env.NSHM_VERSION }} nshmdb.db
+        env:
+          NSHMDB_API_KEY: ${{ secrets.NSHMDB_API_KEY }}
+
+      - name: Setup rclone
+        uses: AnimMouse/setup-rclone@v1
+        with:
+          rclone_config: ${{ secrets.RCLONE_CONFIG }}
+
+      - name: Sync database to Dropbox
+        run: |
+          rclone copy nshmdb.db 'dropbox:/QuakeCoRE/Public/NSHM/nshmdb_${{NSHMDB_VERSION}}.db'
