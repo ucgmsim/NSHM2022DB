@@ -171,8 +171,9 @@ def _download_nshm_solution(url: str) -> ZipFile:
     ZipFile
         An opened zip file object containing the solution files.
     """
-    with requests.get(url, timeout=120) as f:
-        return ZipFile(BytesIO(f.content), "r")
+    with requests.get(url, timeout=120) as resp:
+        resp.raise_for_status()
+        return ZipFile(BytesIO(resp.content), "r")
 
 
 def infer_fault_system(feature_collection: FeatureCollection) -> FaultSystem:
@@ -215,7 +216,7 @@ def _infer_dip_direction(start: np.ndarray, end: np.ndarray) -> float:
     """
     geod = pyproj.Geod(ellps="WGS84")
     strike_direction, _, _ = geod.inv(start[0], start[1], end[0], end[1])
-    return strike_direction + 90
+    return (strike_direction + 90) % 360
 
 
 def _extract_faults_from_info(

@@ -38,6 +38,8 @@ def _parse_version(version: str) -> tuple[int, int, int]:
         If the version string does not strictly match the expected format.
     """
     match version.split("."):
+        case [major, minor]:
+            return int(major), int(minor), 0
         case [major, minor, patch]:
             return int(major), int(minor), int(patch)
         case _:
@@ -57,7 +59,7 @@ def main(
     skip_mfds_creation: Annotated[bool, typer.Option()] = False,
 ):
     """
-    Generate the NSHM2022 rupture data from a CRU system solution package.
+    Generate the NSHM2022 rupture data by downloading logic-tree solutions via the Weka API.
 
     Parameters
     ----------
