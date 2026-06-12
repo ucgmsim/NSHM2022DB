@@ -2,7 +2,9 @@
 
 import copy
 import io
+import warnings
 import zipfile
+from collections import defaultdict
 from collections.abc import Generator, Iterator
 from dataclasses import dataclass
 from io import BytesIO
@@ -78,25 +80,25 @@ def _get_grouped_source_ids(
         "variables": {"version": f"NSHM_v{major}.{minor}.{patch}"},
     }
 
-    response = requests.post(API_URL, json=payload, headers={"X-API-KEY": api_key})
+    response = requests.post(
+        API_URL, json=payload, headers={"X-API-KEY": api_key}, timeout=30
+    )
     response.raise_for_status()
     data = response.json()
 
-    source_ids = {}
+    source_ids = defaultdict(list)
     branch_sets = (
         data.get("data", {})
         .get("get_model", {})
         .get("source_logic_tree", {})
         .get("branch_sets", [])
     )
+    seen_ids = defaultdict(set)
 
     for branch_set in branch_sets:
         short_name = branch_set.get("short_name")
         if not short_name:
             continue
-
-        if short_name not in source_ids:
-            source_ids[short_name] = []
 
         for branch in branch_set.get("branches", []):
             weight = branch["weight"]
@@ -104,6 +106,7 @@ def _get_grouped_source_ids(
                 inversion_id = source.get("inversion_id")
                 if inversion_id and inversion_id not in source_ids[short_name]:
                     source_ids[short_name].append((weight, inversion_id))
+                    seen_ids[short_name].add(inversion_id)
 
     return source_ids
 
@@ -141,7 +144,9 @@ def _get_solution_download_link(api_key: str, node_id: str) -> str:
         "variables": {"id": node_id},
     }
 
-    response = requests.post(API_URL, json=payload, headers={"X-API-KEY": api_key})
+    response = requests.post(
+        API_URL, json=payload, headers={"X-API-KEY": api_key}, timeout=30
+    )
     response.raise_for_status()
     data = response.json()
 
@@ -166,7 +171,7 @@ def _download_nshm_solution(url: str) -> ZipFile:
     ZipFile
         An opened zip file object containing the solution files.
     """
-    with requests.get(url) as f:
+    with requests.get(url, timeout=120) as f:
         return ZipFile(BytesIO(f.content), "r")
 
 
@@ -253,7 +258,7 @@ def _extract_faults_from_info(
         rake = fault_feature.properties["Rake"]
 
         if not shapely.equals_exact(fault_trace, fault_trace_old):
-            print(f"Warning: Fault trace for {name} was altered.")
+            warnings.warn(f"Fault trace for {name!r} was altered.", UserWarning)
 
         if dip_dir is None:
             dip_dir = _infer_dip_direction(wgs_coords[0], wgs_coords[1])
@@ -524,7 +529,15 @@ def _stack_fault_systems(solutions: list[NSHMSolution]) -> NSHMSolution:
     -------
     NSHMSolution
         The combined overarching structural block.
+
+    Raises
+    ------
+    ValueError
+        If the solution list is empty.
     """
+    if not solutions:
+        raise ValueError("No solutions to stack.")
+
     mfds = [
         s.magnitude_frequency_distribution
         for s in solutions
