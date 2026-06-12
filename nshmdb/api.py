@@ -323,7 +323,8 @@ def _merge_branches(solutions: Iterator[tuple[float, ZipFile]]) -> NSHMSolution:
 
     rupture_properties["rate"] *= first_weight
 
-    # NOTE: You may be tempted to refactor this to iterate twice:
+    # NOTE: You may be tempted to refactor this to iterate to
+    #
     # rupture properties = sum(weight * rate for rate in solutions)
     # mfds = sum(weight * mfds for ...)
     #
