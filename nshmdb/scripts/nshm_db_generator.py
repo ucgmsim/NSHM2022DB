@@ -1,23 +1,9 @@
 #!/usr/bin/env python3
 """
-NSHM2022 Rupture Data Generation Script
+NSHM2022 rupture data generation script.
 
-This script generates NSHM2022 rupture data from a CRU system solution package.
-
-Usage:
-    python script_name.py [OPTIONS] CRU_SOLUTIONS_ZIP_PATH SQLITE_DB_PATH
-
-Arguments:
-    CRU_SOLUTIONS_ZIP_PATH : str
-        Path to the CRU solutions zip file.
-    SQLITE_DB_PATH : str
-        Output SQLite DB path.
-
-Options:
-    --skip-faults-creation : bool, optional
-        If flag is set, skip fault creation.
-    --skip-rupture-creation : bool, optional
-        If flag is set, skip rupture creation.
+Fetches NSHM logic tree solutions via the Weka API and composites them
+into a unified SQLite database payload.
 """
 
 from pathlib import Path
@@ -27,11 +13,30 @@ import typer
 
 from nshmdb import api
 from nshmdb.nshmdb import NSHMDB
+from qcore import cli
 
 app = typer.Typer()
 
 
 def _parse_version(version: str) -> tuple[int, int, int]:
+    """
+    Parses a semantic version string into a tuple of integers.
+
+    Parameters
+    ----------
+    version : str
+        The version string in "major.minor.patch" format.
+
+    Returns
+    -------
+    tuple[int, int, int]
+        The parsed (major, minor, patch) version integers.
+
+    Raises
+    ------
+    ValueError
+        If the version string does not strictly match the expected format.
+    """
     match version.split("."):
         case [major, minor, patch]:
             return int(major), int(minor), int(patch)
@@ -39,25 +44,36 @@ def _parse_version(version: str) -> tuple[int, int, int]:
             raise ValueError(f"Cannot parse version {version!r}")
 
 
-@app.command()
+@cli.from_docstring(app)
 def main(
-    version: Annotated[str, typer.Argument(help="NSHM version to download")],
+    version: Annotated[str, typer.Argument()],
     sqlite_db_path: Annotated[
         Path,
-        typer.Argument(help="Output SQLite DB path", writable=True, dir_okay=False),
+        typer.Argument(writable=True, dir_okay=False),
     ],
-    api_key: Annotated[str, typer.Option(help="Weka API key", envvar="NSHMDB_API_KEY")],
-    skip_faults_creation: Annotated[
-        bool, typer.Option(help="If flag is set, skip fault creation.")
-    ] = False,
-    skip_rupture_creation: Annotated[
-        bool, typer.Option(help="If flag is set, skip rupture creation.")
-    ] = False,
-    skip_mfds_creation: Annotated[
-        bool, typer.Option(help="If flag is set, skip MFDS creation.")
-    ] = False,
+    api_key: Annotated[str, typer.Option(envvar="NSHMDB_API_KEY")],
+    skip_faults_creation: Annotated[bool, typer.Option()] = False,
+    skip_rupture_creation: Annotated[bool, typer.Option()] = False,
+    skip_mfds_creation: Annotated[bool, typer.Option()] = False,
 ):
-    """Generate the NSHM2022 rupture data from a CRU system solution package."""
+    """
+    Generate the NSHM2022 rupture data from a CRU system solution package.
+
+    Parameters
+    ----------
+    version : str
+        NSHM version to download.
+    sqlite_db_path : Path
+        Output SQLite DB path.
+    api_key : str
+        Weka API key.
+    skip_faults_creation : bool, optional
+        If flag is set, skip fault creation.
+    skip_rupture_creation : bool, optional
+        If flag is set, skip rupture creation.
+    skip_mfds_creation : bool, optional
+        If flag is set, skip MFDS creation.
+    """
     nshm_version = _parse_version(version)
     solution = api.download_composite_solution(api_key, nshm_version)
     with NSHMDB(sqlite_db_path) as db:
