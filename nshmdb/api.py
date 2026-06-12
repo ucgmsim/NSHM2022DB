@@ -1,4 +1,4 @@
-"""Weka api module for compositing a solution file"""
+"""Weka API module for fetching and compositing NSHM solution files."""
 
 import copy
 import io
@@ -39,9 +39,21 @@ PUYSEGUR_NAME = "Puysegur, 15km, 50% coupling, corrected dip direction"
 def _get_grouped_source_ids(
     api_key: str, version: SolutionVersion
 ) -> dict[str, list[tuple[float, str]]]:
-    """Fetches logic tree data and groups inversion IDs by source type.
+    """
+    Fetches logic tree data and groups inversion IDs by source type.
 
-    Returns a dictionary like {'CRU': [(weight, 'id1'), ...], 'HIK': [...]}
+    Parameters
+    ----------
+    api_key : str
+        The authentication key for the Weka API.
+    version : SolutionVersion
+        The (major, minor, patch) version of the NSHM solution.
+
+    Returns
+    -------
+    dict[str, list[tuple[float, str]]]
+        A mapping of source logic tree short names to lists of their associated
+        (weight, inversion_id) tuples.
     """
     major, minor, patch = version
     payload = {
@@ -97,7 +109,26 @@ def _get_grouped_source_ids(
 
 
 def _get_solution_download_link(api_key: str, node_id: str) -> str:
-    """Uses the InversionSolutionQuery to get the file_url for a specific node ID."""
+    """
+    Retrieves the download URL for a specific solution node.
+
+    Parameters
+    ----------
+    api_key : str
+        The authentication key for the Weka API.
+    node_id : str
+        The GraphQL node ID for the inversion solution file.
+
+    Returns
+    -------
+    str
+        The file download URL.
+
+    Raises
+    ------
+    ValueError
+        If the API fails to return a valid file URL for the given node ID.
+    """
     payload = {
         "query": """query InversionSolutionQuery($id: ID!) {
           node(id: $id) {
@@ -122,12 +153,37 @@ def _get_solution_download_link(api_key: str, node_id: str) -> str:
 
 
 def _download_nshm_solution(url: str) -> ZipFile:
+    """
+    Downloads and opens a zipped NSHM solution file into memory.
+
+    Parameters
+    ----------
+    url : str
+        The URL pointing to the solution zip file.
+
+    Returns
+    -------
+    ZipFile
+        An opened zip file object containing the solution files.
+    """
     with requests.get(url) as f:
         return ZipFile(BytesIO(f.content), "r")
 
 
 def infer_fault_system(feature_collection: FeatureCollection) -> FaultSystem:
-    """Infer the fault system from an NSHM 2022 feature collection."""
+    """
+    Infers the fault system from an NSHM 2022 feature collection.
+
+    Parameters
+    ----------
+    feature_collection : FeatureCollection
+        The GeoJSON object containing the fault definitions.
+
+    Returns
+    -------
+    FaultSystem
+        The enumerated fault system associated with the collection.
+    """
     name = feature_collection.features[0].properties["ParentName"]
     if name == HIKURANGI_NAME:
         return FaultSystem.Hikurangi
@@ -137,6 +193,21 @@ def infer_fault_system(feature_collection: FeatureCollection) -> FaultSystem:
 
 
 def _infer_dip_direction(start: np.ndarray, end: np.ndarray) -> float:
+    """
+    Calculates the standard dip direction based on a line segment.
+
+    Parameters
+    ----------
+    start : np.ndarray
+        The starting (lon, lat) coordinates.
+    end : np.ndarray
+        The ending (lon, lat) coordinates.
+
+    Returns
+    -------
+    float
+        The inferred dip direction in degrees (strike direction + 90 degrees).
+    """
     geod = pyproj.Geod(ellps="WGS84")
     strike_direction, _, _ = geod.inv(start[0], start[1], end[0], end[1])
     return strike_direction + 90
@@ -146,19 +217,20 @@ def _extract_faults_from_info(
     fault_info_list: FeatureCollection,
     fault_system: FaultSystem,
 ) -> list[FaultInfo]:
-    """Extract the fault geometry from the fault information description.
+    """
+    Extracts fault geometry definitions from a GeoJSON feature collection.
 
     Parameters
     ----------
     fault_info_list : FeatureCollection
-        The GeoJson object containing the fault definitions.
+        The GeoJSON object containing the fault trace features and properties.
     fault_system : FaultSystem
-        The fault system these faults belong to.
+        The overarching fault system to associate these faults with.
 
     Returns
     -------
     list[FaultInfo]
-        The list of extracted faults.
+        A list of initialized fault information objects.
     """
     faults = []
 
@@ -211,6 +283,22 @@ def _extract_faults_from_info(
 
 
 def _extract_mfds(solution: ZipFile, fault_system: FaultSystem) -> pd.DataFrame | None:
+    """
+    Extracts the magnitude-frequency distributions (MFDs) from a solution file.
+
+    Parameters
+    ----------
+    solution : ZipFile
+        The opened zip file containing the solution context.
+    fault_system : FaultSystem
+        The fault system to associate with the parsed MFD records.
+
+    Returns
+    -------
+    pd.DataFrame | None
+        A melted dataframe of MFDs with positive rates, or None if the
+        target file is missing.
+    """
     mfds_handle_path = zipfile.Path(solution) / MFDS_PATH
 
     if not mfds_handle_path.exists():
@@ -226,6 +314,22 @@ def _extract_mfds(solution: ZipFile, fault_system: FaultSystem) -> pd.DataFrame 
 
 
 def _extract_ruptures(solution: ZipFile, fault_system: FaultSystem) -> pd.DataFrame:
+    """
+    Extracts rupture properties and bounds them with annual rates.
+
+    Parameters
+    ----------
+    solution : ZipFile
+        The opened zip file containing the solution context.
+    fault_system : FaultSystem
+        The fault system to associate with the parsed ruptures.
+
+    Returns
+    -------
+    pd.DataFrame
+        A dataframe indexed by rupture index containing magnitude, area, length,
+        annual rates, and the fault system identifier.
+    """
     with (
         solution.open(str(RUPTURE_RATES_PATH)) as rupture_rates_handle,
         solution.open(str(RUPTURE_PROPERTIES_PATH)) as rupture_properties_handle,
@@ -249,6 +353,19 @@ def _extract_ruptures(solution: ZipFile, fault_system: FaultSystem) -> pd.DataFr
 
 
 def _read_ruptures(handle: TextIO) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Reads aligned arrays of rupture IDs and their composite fault indices.
+
+    Parameters
+    ----------
+    handle : TextIO
+        The readable text stream of the indices CSV.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        A tuple of (rupture_ids, fault_ids), where each sequence is parallel.
+    """
     _ = next(handle)  # skip header
 
     rupture_ids_raw = []
@@ -277,6 +394,22 @@ def _read_ruptures(handle: TextIO) -> tuple[np.ndarray, np.ndarray]:
 def _extract_rupture_join_table(
     solution: ZipFile, fault_system: FaultSystem
 ) -> pd.DataFrame:
+    """
+    Extracts the normalized rupture-fault intersection mapping.
+
+    Parameters
+    ----------
+    solution : ZipFile
+        The opened zip file containing the solution context.
+    fault_system : FaultSystem
+        The system identifier to apply to the join rows.
+
+    Returns
+    -------
+    pd.DataFrame
+        A mapping dataframe resolving one-to-many relationships between
+        ruptures and underlying fault segments.
+    """
     with solution.open(str(RUPTURE_FAULT_JOIN_PATH)) as rupture_fault_join_handle:
         text_handle = io.TextIOWrapper(rupture_fault_join_handle, encoding="utf-8")
         rupture_ids, fault_ids = _read_ruptures(text_handle)
@@ -291,6 +424,21 @@ def _extract_rupture_join_table(
 
 @dataclass
 class NSHMSolution:
+    """
+    Data payload representing a composite or partial NSHM logic tree solution.
+
+    Parameters
+    ----------
+    magnitude_frequency_distribution : pd.DataFrame | None
+        The computed magnitude frequency bounds.
+    rupture_join_table : pd.DataFrame
+        Mapping defining relationships between rupture IDs and fault IDs.
+    rupture_properties : pd.DataFrame
+        Aggregated physical properties and rate values for specific ruptures.
+    faults : list[FaultInfo]
+        Collection of generated spatial fault definition payloads.
+    """
+
     magnitude_frequency_distribution: pd.DataFrame | None
     rupture_join_table: pd.DataFrame
     rupture_properties: pd.DataFrame
@@ -298,7 +446,22 @@ class NSHMSolution:
 
 
 def _merge_branches(solutions: Iterator[tuple[float, ZipFile]]) -> NSHMSolution:
-    """Combine multiple weighted branch solutions into one by averaging rates and MFDs."""
+    """
+    Aggregates multiple weighted branch solutions into a single composite result.
+
+    Rates and magnitude-frequency values are normalised across the provided sequence.
+
+    Parameters
+    ----------
+    solutions : Iterator[tuple[float, ZipFile]]
+        A stream of branch weights mapped to their respective downloaded
+        solution file buffers.
+
+    Returns
+    -------
+    NSHMSolution
+        The aggregated solution containing normalised composite rates.
+    """
     first_weight, first_solution = next(solutions)
     with first_solution.open(str(FAULT_INFORMATION_PATH)) as fault_info_handle:
         fault_collection = geojson.load(fault_info_handle)
@@ -323,7 +486,7 @@ def _merge_branches(solutions: Iterator[tuple[float, ZipFile]]) -> NSHMSolution:
 
     rupture_properties["rate"] *= first_weight
 
-    # NOTE: You may be tempted to refactor this to iterate to
+    # NOTE: You may be tempted to refactor this to for loop into two neat iterator expressions:
     #
     # rupture properties = sum(weight * rate for rate in solutions)
     # mfds = sum(weight * mfds for ...)
@@ -349,7 +512,19 @@ def _merge_branches(solutions: Iterator[tuple[float, ZipFile]]) -> NSHMSolution:
 
 
 def _stack_fault_systems(solutions: list[NSHMSolution]) -> NSHMSolution:
-    """Concatenate solutions from different fault systems into one."""
+    """
+    Concatenates sub-solutions from distinct fault systems.
+
+    Parameters
+    ----------
+    solutions : list[NSHMSolution]
+        The sequence of regional or disparate fault system solutions.
+
+    Returns
+    -------
+    NSHMSolution
+        The combined overarching structural block.
+    """
     mfds = [
         s.magnitude_frequency_distribution
         for s in solutions
@@ -371,6 +546,21 @@ def _stack_fault_systems(solutions: list[NSHMSolution]) -> NSHMSolution:
 def _solution_stream(
     api_key: str, solution_ids: list[tuple[float, str]]
 ) -> Generator[tuple[float, ZipFile], None, None]:
+    """
+    Lazily fetches branch zip files to minimize memory overhead.
+
+    Parameters
+    ----------
+    api_key : str
+        The authentication key for the Weka API.
+    solution_ids : list[tuple[float, str]]
+        A list of mapped tuple weights and node string IDs to process.
+
+    Yields
+    ------
+    tuple[float, ZipFile]
+        A tuple of the branch weight and its opened zip payload.
+    """
     # Using an iterator pattern here ensures that the each zip file is freed in
     # memory after we finish processing it which reduces the total memory usage.
     for weight, node_id in solution_ids:
@@ -381,6 +571,23 @@ def _solution_stream(
 def download_composite_solution(
     api_key: str, solution_version: SolutionVersion
 ) -> NSHMSolution:
+    """
+    Downloads and composites an entire weighted solution system.
+
+    Parameters
+    ----------
+    api_key : str
+        The authentication key for the Weka API.
+    solution_version : SolutionVersion
+        The targeted integer tuple formulation (major, minor, patch) pointing
+        to a specific model release.
+
+    Returns
+    -------
+    NSHMSolution
+        The resultant singular concatenated solution package resolving all
+        logic trees for the requested version context.
+    """
     ids = _get_grouped_source_ids(api_key, solution_version)
     return _stack_fault_systems(
         [
