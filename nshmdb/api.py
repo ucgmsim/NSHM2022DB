@@ -1,11 +1,11 @@
 import copy
 import io
 import zipfile
-from collections.abc import Generator, Iterable
+from collections.abc import Generator, Iterator
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePath
-from typing import Any, Self, TextIO
+from typing import Any, TextIO
 from zipfile import ZipFile
 
 import geojson
@@ -37,9 +37,9 @@ def format_solution(version: SolutionVersion) -> str:
 def _get_grouped_source_ids(
     api_key: str, version: SolutionVersion
 ) -> dict[str, list[tuple[float, str]]]:
-    """
-    Step 1: Fetches logic tree data and groups inversion IDs by source type.
-    Returns a dictionary like {'CRU': ['id1', 'id2'], 'HIK': ['id3']}
+    """Fetches logic tree data and groups inversion IDs by source type.
+
+    Returns a dictionary like {'CRU': [(weight, 'id1'), ...], 'HIK': [...]}
     """
     payload = {
         "query": """query LogicTreePageQuery($version: String!) {
@@ -94,10 +94,7 @@ def _get_grouped_source_ids(
 
 
 def _get_solution_download_link(api_key: str, node_id: str) -> str:
-    """
-    Step 2: Uses the InversionSolutionQuery to get the file_url and file_name
-    for a specific node ID.
-    """
+    """Uses the InversionSolutionQuery to get the file_url for a specific node ID."""
     payload = {
         "query": """query InversionSolutionQuery($id: ID!) {
           node(id: $id) {
@@ -136,11 +133,9 @@ HIKURANGI_NAME = "Hikurangi, Kermadec to Louisville ridge, 30km - with slip defi
 PUYSEGUR_NAME = "Puysegur, 15km, 50% coupling, corrected dip direction"
 
 
-def infer_fault_system(geojson: FeatureCollection) -> FaultSystem:
+def infer_fault_system(feature_collection: FeatureCollection) -> FaultSystem:
     """Infer the fault system from an NSHM 2022 feature collection."""
-    features = geojson.features
-    test_feature = features[0]
-    name = test_feature.properties["ParentName"]
+    name = feature_collection.features[0].properties["ParentName"]
     if name == HIKURANGI_NAME:
         return FaultSystem.Hikurangi
     elif name == PUYSEGUR_NAME:
@@ -156,6 +151,7 @@ def _infer_dip_direction(start: np.ndarray, end: np.ndarray) -> float:
 
 def _extract_faults_from_info(
     fault_info_list: FeatureCollection,
+    fault_system: FaultSystem,
 ) -> list[FaultInfo]:
     """Extract the fault geometry from the fault information description.
 
@@ -163,18 +159,17 @@ def _extract_faults_from_info(
     ----------
     fault_info_list : FeatureCollection
         The GeoJson object containing the fault definitions.
+    fault_system : FaultSystem
+        The fault system these faults belong to.
 
     Returns
     -------
-    dict[str, Fault]
-        A dictionary of extracted faults. The key is the name of the
-        fault.
+    list[FaultInfo]
+        The list of extracted faults.
     """
-    fault_system = infer_fault_system(fault_info_list)
     faults = []
 
-    for i in range(len(fault_info_list.features)):
-        fault_feature = fault_info_list[i]
+    for fault_feature in fault_info_list.features:
         wgs_coords = list(geojson.utils.coords(fault_feature))
         fault_trace = shapely.LineString(
             coordinates.wgs_depth_to_nztm(np.array(wgs_coords)[:, ::-1])[:, :2]
@@ -183,6 +178,7 @@ def _extract_faults_from_info(
         fault_trace_old = copy.deepcopy(fault_trace)
         fault_trace = shapely.remove_repeated_points(fault_trace, 0)
         trace_coords = np.array(fault_trace.coords)
+
         fault_id = fault_feature.properties["FaultID"]
         name = fault_feature.properties["ParentName"]
         top = fault_feature.properties["UpDepth"]
@@ -197,19 +193,16 @@ def _extract_faults_from_info(
         if dip_dir is None:
             dip_dir = _infer_dip_direction(wgs_coords[0], wgs_coords[1])
 
-        planes = []
-        for j in range(len(trace_coords) - 1):
-            top_left = trace_coords[j]
-            top_right = trace_coords[j + 1]
-            planes.append(
-                Plane.from_nztm_trace(
-                    np.array([top_left, top_right]),
-                    top,
-                    bottom,
-                    dip,
-                    dip_dir=dip_dir if dip != 90 else 0,
-                ),
+        planes = [
+            Plane.from_nztm_trace(
+                np.array([trace_coords[j], trace_coords[j + 1]]),
+                top,
+                bottom,
+                dip,
+                dip_dir=dip_dir if dip != 90 else 0,
             )
+            for j in range(len(trace_coords) - 1)
+        ]
 
         faults.append(
             FaultInfo(
@@ -224,7 +217,7 @@ def _extract_faults_from_info(
     return faults
 
 
-def _extract_mfds(solution: ZipFile) -> pd.DataFrame | None:
+def _extract_mfds(solution: ZipFile, fault_system: FaultSystem) -> pd.DataFrame | None:
     mfds_handle_path = zipfile.Path(solution) / MFDS_PATH
 
     if not mfds_handle_path.exists():
@@ -235,25 +228,19 @@ def _extract_mfds(solution: ZipFile) -> pd.DataFrame | None:
         mfds = mfds.rename(columns={"Section Index": "nshm_id"})
         mfds = mfds.melt(id_vars=["nshm_id"], var_name="magnitude", value_name="rate")
         mfds = mfds[mfds["rate"] > 0]
+        mfds["fault_system"] = fault_system
         return mfds
 
 
-def _extract_faults(solution: ZipFile) -> list[FaultInfo]:
-    with solution.open(str(FAULT_INFORMATION_PATH)) as fault_info_handle:
-        return _extract_faults_from_info(geojson.load(fault_info_handle))
-
-
-def _extract_ruptures(solution: ZipFile) -> pd.DataFrame:
+def _extract_ruptures(solution: ZipFile, fault_system: FaultSystem) -> pd.DataFrame:
     with (
         solution.open(str(RUPTURE_RATES_PATH)) as rupture_rates_handle,
         solution.open(str(RUPTURE_PROPERTIES_PATH)) as rupture_properties_handle,
     ):
         rupture_rates = pd.read_csv(rupture_rates_handle).set_index("Rupture Index")
-        rupture_rates.rename_axis("nshm_id")
         rupture_properties = pd.read_csv(rupture_properties_handle).set_index(
             "Rupture Index"
         )
-        rupture_properties.rename_axis("nshm_id")
         rupture_properties = rupture_properties.join(rupture_rates)
         rupture_properties = rupture_properties.rename(
             columns={
@@ -264,6 +251,7 @@ def _extract_ruptures(solution: ZipFile) -> pd.DataFrame:
             }
         )
         rupture_properties = rupture_properties[["magnitude", "area", "len", "rate"]]
+        rupture_properties["fault_system"] = fault_system
         return rupture_properties
 
 
@@ -293,25 +281,19 @@ def _read_ruptures(handle: TextIO) -> tuple[np.ndarray, np.ndarray]:
     )
 
 
-def _extract_rupture_join_table(solution: ZipFile) -> pd.DataFrame:
+def _extract_rupture_join_table(
+    solution: ZipFile, fault_system: FaultSystem
+) -> pd.DataFrame:
     with solution.open(str(RUPTURE_FAULT_JOIN_PATH)) as rupture_fault_join_handle:
-        text_handle = io.TextIOWrapper(
-            rupture_fault_join_handle,
-            encoding="utf-8",
-        )
+        text_handle = io.TextIOWrapper(rupture_fault_join_handle, encoding="utf-8")
         rupture_ids, fault_ids = _read_ruptures(text_handle)
-        rupture_fault_join_df = pd.DataFrame(
-            dict(rupture_id=rupture_ids, fault_id=fault_ids)
+        return pd.DataFrame(
+            {
+                "rupture_id": rupture_ids,
+                "fault_id": fault_ids,
+                "fault_system": fault_system,
+            }
         )
-
-        rupture_fault_join_df["rupture_id"] = rupture_fault_join_df[
-            "rupture_id"
-        ].astype(int)
-        rupture_fault_join_df["fault_id"] = rupture_fault_join_df["fault_id"].astype(
-            int
-        )
-
-        return rupture_fault_join_df
 
 
 @dataclass
@@ -321,86 +303,95 @@ class NSHMSolution:
     rupture_properties: pd.DataFrame
     faults: list[FaultInfo]
 
-    @classmethod
-    def from_solution_zip_file(cls, solution: ZipFile) -> Self:
-        return cls(
-            magnitude_frequency_distribution=_extract_mfds(solution),
-            faults=_extract_faults(solution),
-            rupture_properties=_extract_ruptures(solution),
-            rupture_join_table=_extract_rupture_join_table(solution),
-        )
 
+def _merge_branches(solutions: Iterator[tuple[float, ZipFile]]) -> NSHMSolution:
+    """Combine multiple weighted branch solutions into one by averaging rates and MFDs."""
+    first_weight, first_solution = next(solutions)
+    with first_solution.open(str(FAULT_INFORMATION_PATH)) as fault_info_handle:
+        fault_collection = geojson.load(fault_info_handle)
 
-def _aggregate_solutions(
-    solutions: Iterable[tuple[float, ZipFile]],
-) -> NSHMSolution:
-    composite_solution = None
+    fault_system = infer_fault_system(fault_collection)
+
+    # Optimisation here: the faults and rupture join table don't change between
+    # solutions in the same fault system so we parse them only once.
+    faults = _extract_faults_from_info(fault_collection, fault_system)
+    rupture_join_table = _extract_rupture_join_table(first_solution, fault_system)
+    rupture_properties = _extract_ruptures(first_solution, fault_system)
+    mfds = _extract_mfds(first_solution, fault_system)
+
+    # Now for every subsequent rupture we only extract MFDs and rupture
+    # properties (i.e. rates). These are the only things that change between
+    # branches of the fault systems.
+
+    # Hikurangi and Puysegur don't have MFDs, so we guard against the None case
+    fault_system_has_mfds = mfds is not None
+    if fault_system_has_mfds:
+        mfds["rate"] *= first_weight
+
+    rupture_properties["rate"] *= first_weight
+
+    # NOTE: You may be tempted to refactor this to iterate twice:
+    # rupture properties = sum(weight * rate for rate in solutions)
+    # mfds = sum(weight * mfds for ...)
+    #
+    # But the iterator type forces us to iterate exactly once because the
+    # iterator is consumed and can't be traversed twice. This is so that we can
+    # stream download the content one branch at a time in memory.
     for weight, solution in solutions:
-        if composite_solution is None:
-            composite_solution = NSHMSolution.from_solution_zip_file(solution)
-            composite_solution.rupture_properties["rate"] *= weight
-        else:
-            rupture_properties = _extract_ruptures(solution)
-            composite_solution.rupture_properties["rate"] += (
-                weight * rupture_properties["rate"]
-            )
-
-    if not composite_solution:
-        raise ValueError("Empty solution stream")
-
-    return composite_solution
-
-
-def _concatenate_solutions(solutions: list[NSHMSolution]) -> NSHMSolution:
-    mfds = []
-    rupture_join_tables = []
-    rupture_properties = []
-    faults = []
-    for solution in solutions:
-        fault_system = solution.faults[0].fault_system
-        faults.extend(solution.faults)
-
-        mfd = solution.magnitude_frequency_distribution
-        if mfd is not None:
-            mfd["fault_system"] = fault_system
-            mfds.append(mfd)
-
-        rupture_join_table = solution.rupture_join_table
-        rupture_join_table["fault_system"] = fault_system
-        rupture_join_tables.append(rupture_join_table)
-
-        rupture_properties_table = solution.rupture_properties
-        rupture_properties_table["fault_system"] = fault_system
-        rupture_properties.append(rupture_properties_table)
+        rates = _extract_ruptures(solution, fault_system)["rate"]
+        rupture_properties["rate"] += weight * rates
+        if fault_system_has_mfds:
+            soln_mfds = _extract_mfds(solution, fault_system)
+            # Technically soln_mfds could be None but we can guard against that.
+            assert soln_mfds is not None
+            mfds["rate"] += weight * soln_mfds["rate"]
 
     return NSHMSolution(
+        magnitude_frequency_distribution=mfds,
+        rupture_join_table=rupture_join_table,
+        rupture_properties=rupture_properties,
         faults=faults,
-        magnitude_frequency_distribution=pd.concat(mfds) if mfds else None,
-        rupture_join_table=pd.concat(rupture_join_tables),
-        rupture_properties=pd.concat(rupture_properties),
+    )
+
+
+def _stack_fault_systems(solutions: list[NSHMSolution]) -> NSHMSolution:
+    """Concatenate solutions from different fault systems into one."""
+    mfds = [
+        s.magnitude_frequency_distribution
+        for s in solutions
+        if s.magnitude_frequency_distribution is not None
+    ]
+    if mfds:
+        magnitude_frequency_distribution = pd.concat(mfds)
+    else:
+        magnitude_frequency_distribution = None
+
+    return NSHMSolution(
+        faults=[f for s in solutions for f in s.faults],
+        rupture_properties=pd.concat(s.rupture_properties for s in solutions),
+        rupture_join_table=pd.concat(s.rupture_join_table for s in solutions),
+        magnitude_frequency_distribution=magnitude_frequency_distribution,
     )
 
 
 def _solution_stream(
     api_key: str, solution_ids: list[tuple[float, str]]
 ) -> Generator[tuple[float, ZipFile], None, None]:
-    for weight, id in solution_ids:
-        url = _get_solution_download_link(api_key, id)
-        file = _download_nshm_solution(url)
-        yield (weight, file)
+    # Using an iterator pattern here ensures that the each zip file is freed in
+    # memory after we finish processing it which reduces the total memory usage.
+    for weight, node_id in solution_ids:
+        url = _get_solution_download_link(api_key, node_id)
+        yield weight, _download_nshm_solution(url)
 
 
 def download_composite_solution(
     api_key: str, solution_version: SolutionVersion
 ) -> NSHMSolution:
     ids = _get_grouped_source_ids(api_key, solution_version)
-    weighted_solutions = []
-    for solution_ids in ids.values():
-        if not solution_ids:
-            continue
-        weighted_solution = _aggregate_solutions(
-            _solution_stream(api_key, solution_ids)
-        )
-        weighted_solutions.append(weighted_solution)
-
-    return _concatenate_solutions(weighted_solutions)
+    return _stack_fault_systems(
+        [
+            _merge_branches(_solution_stream(api_key, solution_ids))
+            for solution_ids in ids.values()
+            if solution_ids
+        ]
+    )
