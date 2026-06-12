@@ -104,7 +104,7 @@ def _get_grouped_source_ids(
             weight = branch["weight"]
             for source in branch.get("sources", []):
                 inversion_id = source.get("inversion_id")
-                if inversion_id and inversion_id not in source_ids[short_name]:
+                if inversion_id and inversion_id not in seen_ids[short_name]:
                     source_ids[short_name].append((weight, inversion_id))
                     seen_ids[short_name].add(inversion_id)
 
@@ -468,17 +468,19 @@ def _merge_branches(solutions: Iterator[tuple[float, ZipFile]]) -> NSHMSolution:
         The aggregated solution containing normalised composite rates.
     """
     first_weight, first_solution = next(solutions)
-    with first_solution.open(str(FAULT_INFORMATION_PATH)) as fault_info_handle:
-        fault_collection = geojson.load(fault_info_handle)
 
-    fault_system = infer_fault_system(fault_collection)
+    with first_solution:
+        with first_solution.open(str(FAULT_INFORMATION_PATH)) as fault_info_handle:
+            fault_collection = geojson.load(fault_info_handle)
 
-    # Optimisation here: the faults and rupture join table don't change between
-    # solutions in the same fault system so we parse them only once.
-    faults = _extract_faults_from_info(fault_collection, fault_system)
-    rupture_join_table = _extract_rupture_join_table(first_solution, fault_system)
-    rupture_properties = _extract_ruptures(first_solution, fault_system)
-    mfds = _extract_mfds(first_solution, fault_system)
+        fault_system = infer_fault_system(fault_collection)
+
+        # Optimisation here: the faults and rupture join table don't change between
+        # solutions in the same fault system so we parse them only once.
+        faults = _extract_faults_from_info(fault_collection, fault_system)
+        rupture_join_table = _extract_rupture_join_table(first_solution, fault_system)
+        rupture_properties = _extract_ruptures(first_solution, fault_system)
+        mfds = _extract_mfds(first_solution, fault_system)
 
     # Now for every subsequent rupture we only extract MFDs and rupture
     # properties (i.e. rates). These are the only things that change between
@@ -500,14 +502,15 @@ def _merge_branches(solutions: Iterator[tuple[float, ZipFile]]) -> NSHMSolution:
     # iterator is consumed and can't be traversed twice. This is so that we can
     # stream download the content one branch at a time in memory.
     for weight, solution in solutions:
-        rates = _extract_ruptures(solution, fault_system)["rate"]
-        rupture_properties["rate"] += weight * rates
-        if fault_system_has_mfds:
-            soln_mfds = _extract_mfds(solution, fault_system)
-            # Technically soln_mfds could be None but we can guard against that.
-            if soln_mfds is None:
-                raise ValueError("Expected MFDs for the solution but got None")
-            mfds["rate"] += weight * soln_mfds["rate"]
+        with solution:
+            rates = _extract_ruptures(solution, fault_system)["rate"]
+            rupture_properties["rate"] += weight * rates
+            if fault_system_has_mfds:
+                soln_mfds = _extract_mfds(solution, fault_system)
+                # Technically soln_mfds could be None but we can guard against that.
+                if soln_mfds is None:
+                    raise ValueError("Expected MFDs for the solution but got None")
+                mfds["rate"] += weight * soln_mfds["rate"]
 
     return NSHMSolution(
         magnitude_frequency_distribution=mfds,
