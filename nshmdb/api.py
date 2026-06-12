@@ -104,7 +104,7 @@ def _get_grouped_source_ids(
             weight = branch["weight"]
             for source in branch.get("sources", []):
                 inversion_id = source.get("inversion_id")
-                if inversion_id and inversion_id not in source_ids[short_name]:
+                if inversion_id and inversion_id not in seen_ids[short_name]:
                     source_ids[short_name].append((weight, inversion_id))
                     seen_ids[short_name].add(inversion_id)
 
