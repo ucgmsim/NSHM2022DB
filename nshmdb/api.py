@@ -216,7 +216,7 @@ def _infer_dip_direction(start: np.ndarray, end: np.ndarray) -> float:
     """
     geod = pyproj.Geod(ellps="WGS84")
     strike_direction, _, _ = geod.inv(start[0], start[1], end[0], end[1])
-    return strike_direction + 90
+    return (strike_direction + 90) % 360
 
 
 def _extract_faults_from_info(
