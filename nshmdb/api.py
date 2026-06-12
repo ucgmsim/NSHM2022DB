@@ -500,7 +500,8 @@ def _merge_branches(solutions: Iterator[tuple[float, ZipFile]]) -> NSHMSolution:
         if fault_system_has_mfds:
             soln_mfds = _extract_mfds(solution, fault_system)
             # Technically soln_mfds could be None but we can guard against that.
-            assert soln_mfds is not None
+            if soln_mfds is None:
+                raise ValueError("Expected MFDs for the solution but got None")
             mfds["rate"] += weight * soln_mfds["rate"]
 
     return NSHMSolution(
