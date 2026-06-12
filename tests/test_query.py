@@ -105,3 +105,18 @@ def test_to_sql_lower_rate_bound():
     sql_query, parameters = to_sql(query_str, rate_bounds=(0.1, None))
     assert "rupture.rate >= ?" in sql_query
     assert 0.1 in parameters
+
+
+def test_token_stream_stop_iteration():
+    """Test that StopIteration is raised when iterating past the end of a stream."""
+    tokens = [Token(TokenType.FAULT, "fault1")]
+    stream = TokenStream(tokens)
+    next(stream)
+    with pytest.raises(StopIteration):
+        next(stream)
+
+
+def test_parse_leading_operator():
+    """Test that parse raises ValueError when the expression starts with a binary operator."""
+    with pytest.raises(ValueError, match=r"Invalid search expression"):
+        parse("& fault1")
