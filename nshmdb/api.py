@@ -1,3 +1,5 @@
+"""Weka api module for compositing a solution file"""
+
 import copy
 import io
 import zipfile
@@ -5,7 +7,7 @@ from collections.abc import Generator, Iterator
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePath
-from typing import Any, TextIO
+from typing import TextIO
 from zipfile import ZipFile
 
 import geojson
@@ -24,14 +26,14 @@ API_URL = "https://nshm-api.gns.cri.nz/weka-app-api/graphql"
 
 SolutionVersion = tuple[int, int, int]
 
+FAULT_INFORMATION_PATH = PurePath("ruptures") / "fault_sections.geojson"
+RUPTURE_FAULT_JOIN_PATH = PurePath("ruptures") / "indices.csv"
+RUPTURE_RATES_PATH = PurePath("solution") / "rates.csv"
+RUPTURE_PROPERTIES_PATH = PurePath("ruptures") / "properties.csv"
+MFDS_PATH = PurePath("ruptures") / "sub_seismo_on_fault_mfds.csv"
 
-def api_headers(api_key: str) -> dict[str, Any]:
-    return {"X-API-KEY": api_key}
-
-
-def format_solution(version: SolutionVersion) -> str:
-    major, minor, patch = version
-    return f"NSHM_v{major}.{minor}.{patch}"
+HIKURANGI_NAME = "Hikurangi, Kermadec to Louisville ridge, 30km - with slip deficit smoothed near East Cape and locked near trench."
+PUYSEGUR_NAME = "Puysegur, 15km, 50% coupling, corrected dip direction"
 
 
 def _get_grouped_source_ids(
@@ -41,6 +43,7 @@ def _get_grouped_source_ids(
 
     Returns a dictionary like {'CRU': [(weight, 'id1'), ...], 'HIK': [...]}
     """
+    major, minor, patch = version
     payload = {
         "query": """query LogicTreePageQuery($version: String!) {
           get_model(version: $version) {
@@ -60,10 +63,10 @@ def _get_grouped_source_ids(
             }
           }
         }""",
-        "variables": {"version": format_solution(version)},
+        "variables": {"version": f"NSHM_v{major}.{minor}.{patch}"},
     }
 
-    response = requests.post(API_URL, json=payload, headers=api_headers(api_key))
+    response = requests.post(API_URL, json=payload, headers={"X-API-KEY": api_key})
     response.raise_for_status()
     data = response.json()
 
@@ -107,7 +110,7 @@ def _get_solution_download_link(api_key: str, node_id: str) -> str:
         "variables": {"id": node_id},
     }
 
-    response = requests.post(API_URL, json=payload, headers=api_headers(api_key))
+    response = requests.post(API_URL, json=payload, headers={"X-API-KEY": api_key})
     response.raise_for_status()
     data = response.json()
 
@@ -121,16 +124,6 @@ def _get_solution_download_link(api_key: str, node_id: str) -> str:
 def _download_nshm_solution(url: str) -> ZipFile:
     with requests.get(url) as f:
         return ZipFile(BytesIO(f.content), "r")
-
-
-FAULT_INFORMATION_PATH = PurePath("ruptures") / "fault_sections.geojson"
-RUPTURE_FAULT_JOIN_PATH = PurePath("ruptures") / "indices.csv"
-RUPTURE_RATES_PATH = PurePath("solution") / "rates.csv"
-RUPTURE_PROPERTIES_PATH = PurePath("ruptures") / "properties.csv"
-MFDS_PATH = PurePath("ruptures") / "sub_seismo_on_fault_mfds.csv"
-
-HIKURANGI_NAME = "Hikurangi, Kermadec to Louisville ridge, 30km - with slip deficit smoothed near East Cape and locked near trench."
-PUYSEGUR_NAME = "Puysegur, 15km, 50% coupling, corrected dip direction"
 
 
 def infer_fault_system(feature_collection: FeatureCollection) -> FaultSystem:
