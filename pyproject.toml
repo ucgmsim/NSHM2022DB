@@ -89,3 +89,8 @@ known-first-party = [
 "tests/**.py" = ["D"]
 
 
+[tool.coverage.run]
+omit = [
+     "nshmdb/api.py",
+     "nshmdb/scripts/nshm_db_generator.py"
+]
