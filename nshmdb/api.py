@@ -1,12 +1,11 @@
-import codecs
 import copy
-import csv
+import io
 import zipfile
 from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePath
-from typing import Any, Self
+from typing import Any, Self, TextIO
 from zipfile import ZipFile
 
 import geojson
@@ -268,25 +267,50 @@ def _extract_ruptures(solution: ZipFile) -> pd.DataFrame:
         return rupture_properties
 
 
-def _read_ruptures(handle: Iterable[str]) -> Generator[tuple[int, int], None, None]:
-    # Could do this with pandas DataFrame + melt but this stops the large crustal solutions blowing up memory.
-    reader = csv.reader(handle)
-    # Skip header
-    _ = next(reader)
-    for row in reader:
-        rupture_index = int(row[0])
-        num_segments = int(row[1])
-        for segment in row[2 : 2 + num_segments]:
-            yield (rupture_index, int(segment))
+def _read_ruptures(handle: TextIO) -> tuple[np.ndarray, np.ndarray]:
+    _ = next(handle)  # skip header
+
+    rupture_ids_raw = []
+    fault_ids_raw = []
+
+    for line in handle:
+        parts = line.split(",")
+        rupture_index = parts[0]
+        num_segments = int(parts[1])
+        fault_ids_raw.extend(parts[2 : 2 + num_segments])
+        rupture_ids_raw.append((rupture_index, num_segments))
+
+    counts = np.fromiter(
+        (r[1] for r in rupture_ids_raw), dtype=np.int32, count=len(rupture_ids_raw)
+    )
+    r_ids = np.fromiter(
+        (r[0] for r in rupture_ids_raw), dtype=np.int32, count=len(rupture_ids_raw)
+    )
+
+    return (
+        np.repeat(r_ids, counts),
+        np.array(fault_ids_raw, dtype=np.int32),
+    )
 
 
 def _extract_rupture_join_table(solution: ZipFile) -> pd.DataFrame:
     with solution.open(str(RUPTURE_FAULT_JOIN_PATH)) as rupture_fault_join_handle:
-        rupture_fault_join_df = pd.DataFrame(
-            # Using codecs.iterdecode here stops the entire CSV buffering in memory.
-            _read_ruptures(codecs.iterdecode(rupture_fault_join_handle, "utf-8")),
-            columns=["rupture_id", "fault_id"],
+        text_handle = io.TextIOWrapper(
+            rupture_fault_join_handle,
+            encoding="utf-8",
         )
+        rupture_ids, fault_ids = _read_ruptures(text_handle)
+        rupture_fault_join_df = pd.DataFrame(
+            dict(rupture_id=rupture_ids, fault_id=fault_ids)
+        )
+
+        rupture_fault_join_df["rupture_id"] = rupture_fault_join_df[
+            "rupture_id"
+        ].astype(int)
+        rupture_fault_join_df["fault_id"] = rupture_fault_join_df["fault_id"].astype(
+            int
+        )
+
         return rupture_fault_join_df
 
 
@@ -320,6 +344,7 @@ def _aggregate_solutions(
             composite_solution.rupture_properties["rate"] += (
                 weight * rupture_properties["rate"]
             )
+
     if not composite_solution:
         raise ValueError("Empty solution stream")
 
@@ -336,7 +361,7 @@ def _concatenate_solutions(solutions: list[NSHMSolution]) -> NSHMSolution:
         faults.extend(solution.faults)
 
         mfd = solution.magnitude_frequency_distribution
-        if mfd:
+        if mfd is not None:
             mfd["fault_system"] = fault_system
             mfds.append(mfd)
 
@@ -371,7 +396,7 @@ def download_composite_solution(
     ids = _get_grouped_source_ids(api_key, solution_version)
     weighted_solutions = []
     for solution_ids in ids.values():
-        if not ids:
+        if not solution_ids:
             continue
         weighted_solution = _aggregate_solutions(
             _solution_stream(api_key, solution_ids)
