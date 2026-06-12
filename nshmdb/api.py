@@ -171,8 +171,9 @@ def _download_nshm_solution(url: str) -> ZipFile:
     ZipFile
         An opened zip file object containing the solution files.
     """
-    with requests.get(url, timeout=120) as f:
-        return ZipFile(BytesIO(f.content), "r")
+    with requests.get(url, timeout=120) as resp:
+        resp.raise_for_status()
+        return ZipFile(BytesIO(resp.content), "r")
 
 
 def infer_fault_system(feature_collection: FeatureCollection) -> FaultSystem:

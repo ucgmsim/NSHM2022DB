@@ -81,7 +81,7 @@ jobs:
 
       - name: Generate Database
         run: |
-          uv run nshmdb ${{ env.NSHM_VERSION }} nshmdb.db
+          nshmdb ${{ env.NSHM_VERSION }} nshmdb.db
         env:
           NSHMDB_API_KEY: ${{ secrets.NSHMDB_API_KEY }}
 
@@ -92,4 +92,4 @@ jobs:
 
       - name: Sync database to Dropbox
         run: |
-          rclone copy nshmdb.db 'dropbox:/QuakeCoRE/Public/NSHM/nshmdb_${{NSHMDB_VERSION}}.db'
+          rclone copy nshmdb.db 'dropbox:/QuakeCoRE/Public/NSHM/nshmdb_${{ env.NSHMDB_VERSION }}.db'
