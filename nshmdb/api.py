@@ -213,6 +213,7 @@ def _infer_dip_direction(start: np.ndarray, end: np.ndarray) -> float:
     -------
     float
         The inferred dip direction in degrees (strike direction + 90 degrees).
+        The dip direction shall always be between 0 and 360 degrees.
     """
     geod = pyproj.Geod(ellps="WGS84")
     strike_direction, _, _ = geod.inv(start[0], start[1], end[0], end[1])
@@ -236,7 +237,7 @@ def _extract_faults_from_info(
     Returns
     -------
     list[FaultInfo]
-        A list of initialized fault information objects.
+        A list of initialised fault information objects.
     """
     faults = []
 
@@ -583,6 +584,11 @@ def _solution_stream(
     # memory after we finish processing it which reduces the total memory usage.
     for weight, node_id in solution_ids:
         url = _get_solution_download_link(api_key, node_id)
+
+        # NOTE: _download_nshm_solution returns a file in-memory. This means
+        # that there are no resource leaks with this code as the memory is
+        # garbage collected when the solution is processed. Hence, there is no
+        # resource management required here.
         yield weight, _download_nshm_solution(url)
 
 
