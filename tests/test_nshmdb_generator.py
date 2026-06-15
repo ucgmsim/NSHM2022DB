@@ -18,7 +18,7 @@ def test_nshmdb_generator(tmp_path: Path):
     nshm_db_generator.main(CRU_FAULT_SOLUTIONS, nshmdb_path)
     with NSHMDB(nshmdb_path) as db:
         rupture = db.get_rupture(FaultSystem.Crustal, 3)
-        assert rupture.rupture_id == 3
+        assert rupture.rupture_nshm_id == 3
         assert rupture.magnitude == 7.2375555
         assert rupture.rate == 1.012588e-05
         assert rupture.area == 1090332700
