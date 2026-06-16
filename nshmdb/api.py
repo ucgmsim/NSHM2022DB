@@ -278,7 +278,7 @@ def _extract_faults_from_info(
 
         faults.append(
             FaultInfo(
-                fault_id=fault_id,
+                fault_nshm_id=fault_id,
                 fault_system=fault_system,
                 name=name,
                 rake=rake,
