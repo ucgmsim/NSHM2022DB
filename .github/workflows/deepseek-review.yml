@@ -3,6 +3,9 @@ name: DeepSeek PR Review
 on:
   pull_request_target:
     types: [opened, reopened, synchronize]
+  issue_comment:
+      types:
+        - created # Triggers when a comment is created on a PR    
 
 permissions:
   contents: read
@@ -15,5 +18,10 @@ jobs:
       - name: DeepSeek Code Review
         uses: hustcer/deepseek-review@v1
         with:
+          model: "deepseek-ai/DeepSeek-R1"
+          base-url: "https://api.siliconflow.cn/v1"
+          watch-mention: "@github-actions"
           chat-token: ${{ secrets.DEEPSEEK_API_KEY }}
+          allowed-associations: "OWNER,MEMBER,COLLABORATOR"
+
 
