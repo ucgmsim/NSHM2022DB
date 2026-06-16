@@ -4,8 +4,8 @@ on:
   pull_request_target:
     types: [opened, reopened, synchronize]
   issue_comment:
-      types:
-        - created # Triggers when a comment is created on a PR    
+    types:
+      - created # Triggers when a comment is created on a PR
 
 permissions:
   contents: read
