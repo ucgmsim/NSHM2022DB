@@ -41,7 +41,7 @@ def test_get_rupture(test_db: NSHMDB):
     rupture = test_db.get_rupture(FaultSystem.Crustal, 1)
     assert rupture == Rupture(
         fault_system=FaultSystem.Crustal,
-        rupture_id=1,
+        rupture_nshm_id=1,
         magnitude=6.5,
         area=25.0,
         length=10.0,
@@ -109,7 +109,7 @@ def test_get_rupture_fault_info(alpine_fault_nshmdb: NSHMDB):
     assert faults == {
         "Alpine Fault": FaultInfo(
             fault_system=FaultSystem.Crustal,
-            fault_id=1,
+            fault_nshm_id=1,
             name="Alpine Fault",
             rake=90.0,
             tect_type=None,
@@ -121,16 +121,16 @@ def test_query(alpine_fault_nshmdb: NSHMDB):
     ruptures = alpine_fault_nshmdb.query("Alpine Fault")
     assert set(ruptures) == {1}
     rupture = ruptures[1]
-    assert rupture.rupture_id == 1
+    assert rupture.rupture_nshm_id == 1
     assert rupture.magnitude == 6.5
     assert rupture.rate == 0.01
     assert set(rupture.faults) == {"Alpine Fault"}
 
 
 def test_rates(alpine_fault_nshmdb: NSHMDB):
-    assert alpine_fault_nshmdb.most_likely_fault(1, {"Alpine Fault": 6.5}) == {
-        "Alpine Fault": 0.01
-    }
+    assert alpine_fault_nshmdb.most_likely_fault(
+        FaultSystem.Crustal, 1, {"Alpine Fault": 6.5}
+    ) == {"Alpine Fault": 0.01}
 
 
 def test_get_fault_info(test_db: NSHMDB):
@@ -144,7 +144,7 @@ def test_get_fault_info(test_db: NSHMDB):
     fault_info = test_db.get_fault_info(FaultSystem.Crustal, 1)
     assert fault_info == FaultInfo(
         fault_system=FaultSystem.Crustal,
-        fault_id=1,
+        fault_nshm_id=1,
         name="Fault A",
         rake=90.0,
         tect_type=None,

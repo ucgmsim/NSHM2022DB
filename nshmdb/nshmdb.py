@@ -5,7 +5,7 @@ Use the `NSHMDB` context manager to open a database connection and query
 fault and rupture data.
 
 >>> with NSHMDB('path/to/nshm.db') as db:
-...     faults = db.get_rupture_faults(1)
+...     rupture = db.get_rupture(FaultSystem.Crustal, 71072)
 """
 
 import collections
@@ -207,7 +207,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         FROM magnitude_frequency_distribution mfd
         JOIN rupture_faults rf ON rf.fault_id = mfd.fault_id
         JOIN rupture r ON r.rupture_id = rf.rupture_id
-        WHERE r.nshm_id = ? AND fault_system = ?
+        WHERE r.nshm_id = ? AND r.fault_system = ?
         ORDER BY mfd.magnitude""",
                 (rupture_nshm_id, fault_system),
             ).fetchall()
@@ -226,7 +226,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         JOIN rupture_faults rf ON rf.fault_id = f.fault_id
         JOIN rupture r ON r.rupture_id = rf.rupture_id
         JOIN magnitude_frequency_distribution mfd ON mfd.fault_id = f.fault_id
-        WHERE r.nshm_id = ? AND fault_system = ? AND
+        WHERE r.nshm_id = ? AND r.fault_system = ? AND
         ("""
             + " OR ".join(
                 ["pf.name = ? AND mfd.magnitude = ?"] * len(parent_fault_magnitudes)
@@ -370,8 +370,10 @@ class NSHMDB(contextlib.AbstractContextManager):
 
         Parameters
         ----------
-        fault_id : int
-            The id of the fault to retreive.
+        fault_system : FaultSystem
+            The fault system the fault belongs to.
+        fault_nshm_id : int
+            The NSHM id of the fault to retrieve.
 
         Returns
         -------
@@ -415,11 +417,13 @@ class NSHMDB(contextlib.AbstractContextManager):
     def get_fault_info(
         self, fault_system: FaultSystem, fault_nshm_id: int
     ) -> FaultInfo:
-        """Get the fault information for a given fault id.
+        """Get the fault information for a given fault.
 
         Parameters
         ----------
-        fault_id : int
+        fault_system : FaultSystem
+            The fault system the fault belongs to.
+        fault_nshm_id : int
             The NSHM fault id.
 
         Returns
@@ -470,8 +474,8 @@ class NSHMDB(contextlib.AbstractContextManager):
         ----------
         fault_system : FaultSystem
             The fault system of the rupture.
-        nshm_id : int
-            The rupture to retrieve.
+        rupture_nshm_id : int
+            The NSHM id of the rupture to retrieve.
 
         Returns
         -------
@@ -500,7 +504,8 @@ class NSHMDB(contextlib.AbstractContextManager):
 
         Parameters
         ----------
-        rupture_id : int
+        rupture_nshm_id : int
+            The internal rupture id.
 
         Returns
         -------
@@ -564,9 +569,8 @@ class NSHMDB(contextlib.AbstractContextManager):
 
         Parameters
         ----------
-        rupture_id : int
-            The rupture id.
-
+        rupture_nshm_id : int
+            The NSHM rupture id.
 
         Returns
         -------
