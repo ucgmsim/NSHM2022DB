@@ -69,7 +69,7 @@ def test_get_fault(test_db: NSHMDB):
         bottom_right_lat, bottom_right_lon, bottom_left_lat, bottom_left_lon, top_depth, bottom_depth, fault_id)
         VALUES (1, -42.0, 172.0, -42.0, 173.0, -43.0, 173.0, -43.0, 172.0, 0.0, 10.0, 1);
         """)
-    fault = test_db.get_fault(1)
+    fault = test_db.get_fault(FaultSystem.Crustal, 1)
     assert np.allclose(
         fault.corners,
         np.array(

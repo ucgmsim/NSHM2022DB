@@ -42,7 +42,9 @@ class Rupture:
     """A rupture from the database."""
 
     fault_system: FaultSystem
-    rupture_id: int
+    """The fault system of the rupture."""
+    rupture_nshm_id: int
+    "The rupture NSHM id."
 
     magnitude: float
     """The rupture magnitude (note: this is not the moment magnitude)"""
@@ -61,7 +63,9 @@ class FaultInfo:
     """Fault metadata stored in the database."""
 
     fault_system: FaultSystem
-    fault_id: int
+    """The fault system the fault belongs to."""
+    fault_nshm_id: int
+    """The fault NSHM id."""
 
     name: str
     """The name of the fault."""
@@ -159,7 +163,10 @@ class NSHMDB(contextlib.AbstractContextManager):
         return self._conn
 
     def most_likely_fault(
-        self, rupture_id: int, parent_fault_magnitudes: dict[str, float]
+        self,
+        fault_system: FaultSystem,
+        rupture_nshm_id: int,
+        parent_fault_magnitudes: dict[str, float],
     ) -> dict[str, float]:
         """
         Calculate the cumulative activity rate for each fault involved in a specified rupture.
@@ -178,8 +185,10 @@ class NSHMDB(contextlib.AbstractContextManager):
 
         Parameters
         ----------
-        rupture_id : int
-            The unique identifier of the rupture to query.
+        fault_system : FaultSystem
+            The fault system for the rupture.
+        rupture_nshm_id : int
+            The NSHM rupture id of the rupture to query.
         parent_fault_magnitudes : dict[str, float]
             A mapping of parent fault names to their expected magnitudes. These magnitudes
             define the target values for querying activity rates in the MFD table.
@@ -198,9 +207,9 @@ class NSHMDB(contextlib.AbstractContextManager):
         FROM magnitude_frequency_distribution mfd
         JOIN rupture_faults rf ON rf.fault_id = mfd.fault_id
         JOIN rupture r ON r.rupture_id = rf.rupture_id
-        WHERE r.nshm_id = ?
+        WHERE r.nshm_id = ? AND fault_system = ?
         ORDER BY mfd.magnitude""",
-                (rupture_id,),
+                (rupture_nshm_id, fault_system),
             ).fetchall()
         ).ravel()
         idx = np.minimum(
@@ -217,13 +226,13 @@ class NSHMDB(contextlib.AbstractContextManager):
         JOIN rupture_faults rf ON rf.fault_id = f.fault_id
         JOIN rupture r ON r.rupture_id = rf.rupture_id
         JOIN magnitude_frequency_distribution mfd ON mfd.fault_id = f.fault_id
-        WHERE r.nshm_id = ? AND
+        WHERE r.nshm_id = ? AND fault_system = ? AND
         ("""
             + " OR ".join(
                 ["pf.name = ? AND mfd.magnitude = ?"] * len(parent_fault_magnitudes)
             )
             + """) GROUP BY pf.name""",
-            (rupture_id,)
+            (rupture_nshm_id, fault_system)
             + tuple(
                 [
                     item
@@ -268,7 +277,7 @@ class NSHMDB(contextlib.AbstractContextManager):
                 (
                     next_fault_idx + i,
                     f.fault_system,
-                    f.fault_id,
+                    f.fault_nshm_id,
                     f.rake,
                     f.tect_type,
                     parent_id_map[f.name],
@@ -356,7 +365,7 @@ class NSHMDB(contextlib.AbstractContextManager):
             "rupture_faults", conn, index=False, if_exists="append"
         )
 
-    def get_fault(self, fault_id: int) -> Fault:
+    def get_fault(self, fault_system: FaultSystem, fault_nshm_id: int) -> Fault:
         """Get a specific fault definition from a database.
 
         Parameters
@@ -374,8 +383,8 @@ class NSHMDB(contextlib.AbstractContextManager):
         cursor.execute(
             """SELECT fp.* FROM fault_plane fp
             JOIN fault f ON fp.fault_id = f.fault_id
-            WHERE f.nshm_id = ?""",
-            (fault_id,),
+            WHERE f.nshm_id = ? AND fault_system = ?""",
+            (fault_nshm_id, fault_system),
         )
         planes = []
         for (
@@ -403,7 +412,9 @@ class NSHMDB(contextlib.AbstractContextManager):
             planes.append(Plane(coordinates.wgs_depth_to_nztm(corners)))
         return Fault(planes)
 
-    def get_fault_info(self, fault_system: FaultSystem, fault_id: int) -> FaultInfo:
+    def get_fault_info(
+        self, fault_system: FaultSystem, fault_nshm_id: int
+    ) -> FaultInfo:
         """Get the fault information for a given fault id.
 
         Parameters
@@ -425,12 +436,12 @@ class NSHMDB(contextlib.AbstractContextManager):
             JOIN parent_fault p ON f.parent_id = p.parent_id
             WHERE f.fault_system = ? AND f.nshm_id = ?
             """,
-            (fault_system, fault_id),
+            (fault_system, fault_nshm_id),
         )
         row = cursor.fetchone()
         if not row:
             raise ValueError(
-                f"Could not find fault with id = {fault_id} in fault system = {fault_system}"
+                f"Could not find fault with id = {fault_nshm_id} in fault system = {fault_system}"
             )
         return FaultInfo(*row, fault=None)
 
@@ -452,7 +463,7 @@ class NSHMDB(contextlib.AbstractContextManager):
             if_exists="append",
         )
 
-    def get_rupture(self, fault_system: FaultSystem, nshm_id: int) -> Rupture:
+    def get_rupture(self, fault_system: FaultSystem, rupture_nshm_id: int) -> Rupture:
         """Retrieve a rupture from the database.
 
         Parameters
@@ -471,11 +482,11 @@ class NSHMDB(contextlib.AbstractContextManager):
         cursor = conn.cursor()
         (rupture_id, magnitude, area, length, rate) = cursor.execute(
             "SELECT rupture_id, magnitude, area, len, rate FROM rupture WHERE nshm_id = ? AND fault_system = ?",
-            (nshm_id, fault_system),
+            (rupture_nshm_id, fault_system),
         ).fetchone()
 
         return Rupture(
-            rupture_id=nshm_id,
+            rupture_nshm_id=rupture_nshm_id,
             fault_system=FaultSystem(fault_system),
             magnitude=magnitude,
             area=area,
@@ -484,7 +495,7 @@ class NSHMDB(contextlib.AbstractContextManager):
             faults=self.get_rupture_faults(rupture_id),
         )
 
-    def get_rupture_faults(self, rupture_id: int) -> dict[str, Fault]:
+    def get_rupture_faults(self, rupture_nshm_id: int) -> dict[str, Fault]:
         """Retrieve faults involved in a rupture from the database.
 
         Parameters
@@ -507,7 +518,7 @@ class NSHMDB(contextlib.AbstractContextManager):
             JOIN parent_fault p ON f.parent_id = p.parent_id
             WHERE rf.rupture_id = ?
             ORDER BY f.parent_id""",
-            (rupture_id,),
+            (rupture_nshm_id,),
         )
         fault_planes = cursor.fetchall()
         faults = collections.defaultdict(lambda: [])
@@ -526,7 +537,7 @@ class NSHMDB(contextlib.AbstractContextManager):
             _,
             fault_id,
             fault_system,
-            parent_id,
+            _,
             parent_name,
         ) in fault_planes:
             corners = np.array(
@@ -548,7 +559,7 @@ class NSHMDB(contextlib.AbstractContextManager):
             faults[fault_name].append(Plane(coordinates.wgs_depth_to_nztm(corners)))
         return {name: Fault(planes) for name, planes in faults.items()}
 
-    def get_rupture_fault_info(self, rupture_id: int) -> dict[str, FaultInfo]:
+    def get_rupture_fault_info(self, rupture_nshm_id: int) -> dict[str, FaultInfo]:
         """Get the rupture fault information for a given rupture.
 
         Parameters
@@ -573,7 +584,7 @@ class NSHMDB(contextlib.AbstractContextManager):
             JOIN parent_fault p ON f.parent_id = p.parent_id
             WHERE r.nshm_id = ?
             """,
-            (rupture_id,),
+            (rupture_nshm_id,),
         )
         fault_rows = cursor.fetchall()
         return {row[0]: FaultInfo(*row[1:], fault=None) for row in fault_rows}
@@ -648,7 +659,7 @@ class NSHMDB(contextlib.AbstractContextManager):
             ruptures = conn.sql(sql_query, params=parameters).fetchall()
             return {
                 nshm_id: Rupture(
-                    rupture_id=nshm_id,
+                    rupture_nshm_id=nshm_id,
                     fault_system=fault_system,
                     magnitude=magnitude,
                     area=area,
