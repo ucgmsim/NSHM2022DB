@@ -183,7 +183,7 @@ def test_insert_many_faults_without_planes(test_db: NSHMDB):
     faults = [
         FaultInfo(
             fault_system=FaultSystem.Crustal,
-            fault_id=1,
+            fault_nshm_id=1,
             name="Fault A",
             rake=90.0,
             tect_type=None,
@@ -191,7 +191,7 @@ def test_insert_many_faults_without_planes(test_db: NSHMDB):
         ),
         FaultInfo(
             fault_system=FaultSystem.Crustal,
-            fault_id=2,
+            fault_nshm_id=2,
             name="Fault B",
             rake=45.0,
             tect_type=1,
@@ -235,7 +235,7 @@ def test_insert_many_ruptures(test_db: NSHMDB):
     faults = [
         FaultInfo(
             fault_system=FaultSystem.Crustal,
-            fault_id=1,
+            fault_nshm_id=1,
             name="Fault A",
             rake=90.0,
             tect_type=None,
@@ -273,7 +273,7 @@ def test_insert_magnitude_frequency_distribution(test_db: NSHMDB):
     faults = [
         FaultInfo(
             fault_system=FaultSystem.Crustal,
-            fault_id=1,
+            fault_nshm_id=1,
             name="Fault A",
             rake=90.0,
             tect_type=None,
