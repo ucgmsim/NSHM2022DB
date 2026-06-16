@@ -218,7 +218,7 @@ def test_insert_many_faults_with_planes(test_db: NSHMDB):
     faults = [
         FaultInfo(
             fault_system=FaultSystem.Crustal,
-            fault_id=1,
+            fault_nshm_id=1,
             name="Alpine Fault",
             rake=90.0,
             tect_type=None,
