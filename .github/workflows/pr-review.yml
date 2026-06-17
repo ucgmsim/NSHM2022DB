@@ -13,6 +13,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Test Ollama connection
+        run: |
+          curl -s http://localhost:11434/api/version || exit 1
+          echo "Ollama is reachable"
+
       - name: Get PR diff
         id: diff
         run: |
