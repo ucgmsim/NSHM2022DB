@@ -4,6 +4,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+permissions:
+  pull-requests: write
+  issues: write   # required for issue comments (PRs are also issues)
+
 jobs:
   review:
     runs-on: self-hosted   # Uses your hypocentre runner
