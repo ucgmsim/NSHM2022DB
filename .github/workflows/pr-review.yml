@@ -24,32 +24,47 @@ jobs:
       - name: Run Ollama review
         id: review
         run: |
-          # Build prompt with the diff
-          PROMPT="You are a code reviewer. Review the following code changes. Focus on:
-          - Bugs and logic errors
-          - Performance issues
-          - Security vulnerabilities
-          - Code style and best practices
-          - Missing error handling
-          
-          Provide specific, actionable feedback for each issue.
-          
-          Code diff:
-          $(cat pr.diff)"
-          
-          # Send to Ollama API (running on localhost)
-          RESPONSE=$(curl -s -X POST http://localhost:11434/api/generate \
-            -d "{
-              \"model\": \"qwen2.5-coder:7b\",
-              \"prompt\": \"$PROMPT\",
-              \"stream\": false,
-              \"options\": {
-                \"temperature\": 0.3,
-                \"max_tokens\": 2000
+            # Install jq if not present (for safe JSON handling)
+            sudo apt-get update && sudo apt-get install -y jq
+        
+            # Write the full prompt to a temporary file
+            cat > prompt.txt << 'EOF'
+            You are a code reviewer. Review the following code changes. Focus on:
+            - Bugs and logic errors
+            - Performance issues
+            - Security vulnerabilities
+            - Code style and best practices
+            - Missing error handling
+        
+            Provide specific, actionable feedback for each issue.
+        
+            Code diff:
+            EOF
+        
+            # Append the diff to the prompt file
+            cat pr.diff >> prompt.txt
+        
+            # Build the JSON payload using jq, reading the prompt from the file
+            jq -n --rawfile prompt prompt.txt '{
+              model: "qwen2.5-coder:7b",
+              prompt: $prompt,
+              stream: false,
+              options: {
+                temperature: 0.3,
+                max_tokens: 2000
               }
-            }")
-          
-          echo "$RESPONSE" | jq -r '.response' > review.txt
+            }' > payload.json
+        
+            # Send to Ollama API
+            curl -s -X POST http://localhost:11434/api/generate \
+              -H "Content-Type: application/json" \
+              -d @payload.json > response.json
+        
+            # Extract the response text
+            jq -r '.response' response.json > review.txt
+        
+            # Clean up temporary files (optional)
+            rm -f prompt.txt payload.json response.json
 
       - name: Post comment to PR
         uses: actions/github-script@v7
