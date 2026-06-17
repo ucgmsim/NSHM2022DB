@@ -242,11 +242,11 @@ def _extract_faults_from_info(
     faults = []
 
     for fault_feature in fault_info_list.features:
-        wgs_coords = list(geojson.utils.coords(fault_feature))
+        wgs_coords = np.array(list(geojson.utils.coords(fault_feature)))
+        wgs_coords = wgs_coords[:, :2]
         fault_trace = shapely.LineString(
-            coordinates.wgs_depth_to_nztm(np.array(wgs_coords)[:, ::-1])[:, :2]
+            coordinates.wgs_depth_to_nztm(np.array(wgs_coords)[:, ::-1])
         )
-
         fault_trace_old = copy.deepcopy(fault_trace)
         fault_trace = shapely.remove_repeated_points(fault_trace, 0)
         trace_coords = np.array(fault_trace.coords)
