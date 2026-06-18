@@ -34,77 +34,139 @@ jobs:
           echo "📊 Files in diff:"
           grep '^diff --git' pr.diff || echo "No diff entries found"
 
-      - name: Run DeepSeek review
+
+      - name: Run Ollama review
         id: review
         run: |
           sudo apt-get update && sudo apt-get install -y jq
-
-          # If diff is empty, exit early
+      
           if [ ! -s pr.diff ]; then
             echo "✅ PR diff is empty. Nothing to review." > review.txt
             exit 0
           fi
-
-          # Use the FULL diff - don't filter it
-          # The AI should handle identifying code vs non-code files
-          cat pr.diff > pr.diff.full
-
+      
           cat > prompt.txt << 'EOF'
           You are a senior code reviewer. Review the following code diff.
-
+      
           CRITICAL RULES:
           1. DO NOT summarize what the code does.
           2. ONLY point out SPECIFIC problems in the code changes.
           3. For each problem, provide:
              - The EXACT file name
-             - The EXACT line number (if available from the diff) – look for the line number in the diff metadata (e.g., @@ -1,5 +1,6 @@) and use it.
              - The EXACT problematic code line (copy the code)
              - WHY it's a problem
              - HOW to fix it
           4. Focus on: bugs, security flaws, performance issues, bad practices.
           5. If you find no issues, output: "✅ No issues found. The code looks good."
-
+      
           FORMAT (MUST FOLLOW EXACTLY):
           ### FILE: filename.py
-          - LINE: 42
+          - LINE: [line number if available]
           - CODE: [the exact problematic line]
           - PROBLEM: [what's wrong]
           - FIX: [how to fix]
-
-          ### FILE: another.py
-          - CODE: [the exact problematic line]
-          - PROBLEM: [what's wrong]
-          - FIX: [how to fix]
-
+      
           Code diff to review:
           EOF
-
-          cat pr.diff.full >> prompt.txt
-
-          # Create JSON payload for DeepSeek API
-          cat > payload.json << JSONEOF
-          {
-            "model": "deepseek-chat",
-            "messages": [
-              {"role": "system", "content": "You are a harsh code reviewer. Only output issues in the exact format specified. If the diff is empty or only contains binary files, output exactly: '✅ No code changes to review.'"},
-              {"role": "user", "content": $(jq -Rs . < prompt.txt)}
+      
+          cat pr.diff >> prompt.txt
+      
+          # Build JSON payload for local Ollama (chat endpoint)
+          jq -n --rawfile prompt prompt.txt '{
+            model: "deepseek-coder-v2:16b",   # or "qwen2.5-coder:14b"
+            messages: [
+              { role: "system", content: "You are a harsh code reviewer. Only output issues in the exact format specified." },
+              { role: "user", content: $prompt }
             ],
-            "temperature": 0.1,
-            "max_tokens": 4000
-          }
-          JSONEOF
-
-          # Call DeepSeek API
-          curl -s -X POST https://api.deepseek.com/v1/chat/completions \
+            stream: false,
+            options: {
+              temperature: 0.1,
+              num_predict: 4000
+            }
+          }' > payload.json
+      
+          # Call local Ollama
+          curl -s -X POST http://localhost:11434/api/chat \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${{ secrets.DEEPSEEK_API_KEY }}" \
             -d @payload.json > response.json
+      
+          # Extract the response (local Ollama returns "message.content")
+          jq -r '.message.content' response.json > review.txt
+      
+          rm -f prompt.txt payload.json response.json
 
-          # Extract the response
-          jq -r '.choices[0].message.content' response.json > review.txt
 
-          # Clean up
-          rm -f prompt.txt payload.json response.json pr.diff.full
+#      - name: Run DeepSeek review
+#        id: review
+#        run: |
+#          sudo apt-get update && sudo apt-get install -y jq
+#
+#          # If diff is empty, exit early
+#          if [ ! -s pr.diff ]; then
+#            echo "✅ PR diff is empty. Nothing to review." > review.txt
+#            exit 0
+#          fi
+#
+#          # Use the FULL diff - don't filter it
+#          # The AI should handle identifying code vs non-code files
+#          cat pr.diff > pr.diff.full
+#
+#          cat > prompt.txt << 'EOF'
+#          You are a senior code reviewer. Review the following code diff.
+#
+#          CRITICAL RULES:
+#          1. DO NOT summarize what the code does.
+#          2. ONLY point out SPECIFIC problems in the code changes.
+#          3. For each problem, provide:
+#             - The EXACT file name
+#             - The EXACT line number (if available from the diff) – look for the line number in the diff metadata (e.g., @@ -1,5 +1,6 @@) and use it.
+#             - The EXACT problematic code line (copy the code)
+#             - WHY it's a problem
+#             - HOW to fix it
+#          4. Focus on: bugs, security flaws, performance issues, bad practices.
+#          5. If you find no issues, output: "✅ No issues found. The code looks good."
+#
+#          FORMAT (MUST FOLLOW EXACTLY):
+#          ### FILE: filename.py
+#          - LINE: 42
+#          - CODE: [the exact problematic line]
+#          - PROBLEM: [what's wrong]
+#          - FIX: [how to fix]
+#
+#          ### FILE: another.py
+#          - CODE: [the exact problematic line]
+#          - PROBLEM: [what's wrong]
+#          - FIX: [how to fix]
+#
+#          Code diff to review:
+#          EOF
+#
+#          cat pr.diff.full >> prompt.txt
+#
+#          # Create JSON payload for DeepSeek API
+#          cat > payload.json << JSONEOF
+#          {
+#            "model": "deepseek-chat",
+#            "messages": [
+#              {"role": "system", "content": "You are a harsh code reviewer. Only output issues in the exact format specified. If the diff is empty or only contains binary files, output exactly: '✅ No code changes to review.'"},
+#              {"role": "user", "content": $(jq -Rs . < prompt.txt)}
+#            ],
+#            "temperature": 0.1,
+#            "max_tokens": 4000
+#          }
+#          JSONEOF
+#
+#          # Call DeepSeek API
+#          curl -s -X POST https://api.deepseek.com/v1/chat/completions \
+#            -H "Content-Type: application/json" \
+#            -H "Authorization: Bearer ${{ secrets.DEEPSEEK_API_KEY }}" \
+#            -d @payload.json > response.json
+#
+#          # Extract the response
+#          jq -r '.choices[0].message.content' response.json > review.txt
+#
+#          # Clean up
+#          rm -f prompt.txt payload.json response.json pr.diff.full
 
 
       - name: Post inline review comments
