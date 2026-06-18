@@ -55,12 +55,12 @@ jobs:
         
             # Build the JSON payload using jq, reading the prompt from the file
             jq -n --rawfile prompt prompt.txt '{
-              model: "qwen2.5-coder:7b",
+              model: "deepseek-coder-v2:16b",
               prompt: $prompt,
               stream: false,
               options: {
-                temperature: 0.3,
-                max_tokens: 2000
+                temperature: 0.2,
+                max_tokens: 3000
               }
             }' > payload.json
         
@@ -94,5 +94,56 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: `## 🤖 AI Code Review\n\n${finalReview}`
+            });
+
+      - name: Post line-level review
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const review = fs.readFileSync('review.txt', 'utf8');
+            
+            // Parse review output for line-specific comments
+            // Format: "### Issue: File:line - Problem"
+            const lines = review.split('\n');
+            const comments = [];
+            let currentFile = '';
+            
+            // Simple parser – customize based on your AI output format
+            for (const line of lines) {
+              const match = line.match(/### Issue: (.+):(\d+) - (.+)/);
+              if (match) {
+                comments.push({
+                  path: match[1].trim(),
+                  line: parseInt(match[2]),
+                  body: match[3].trim()
+                });
+              }
+            }
+            
+            // Post each as a line comment
+            for (const comment of comments) {
+              try {
+                await github.rest.pulls.createReviewComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.issue.number,
+                  body: comment.body,
+                  path: comment.path,
+                  line: comment.line,
+                  side: 'RIGHT'
+                });
+              } catch (e) {
+                console.log(`Failed to post comment for ${comment.path}:${comment.line} - ${e.message}`);
+              }
+            }
+            
+            // Also post a summary comment
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🤖 AI Code Review Summary\n\n${review}`
             });
 
