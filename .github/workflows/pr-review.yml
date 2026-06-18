@@ -6,11 +6,11 @@ on:
 
 permissions:
   pull-requests: write
-  issues: write   # required for issue comments (PRs are also issues)
+  issues: write
 
 jobs:
   review:
-    runs-on: self-hosted   # Uses your hypocentre runner
+    runs-on: self-hosted
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -25,33 +25,43 @@ jobs:
             -H "Accept: application/vnd.github.v3.diff" \
             "${{ github.event.pull_request.diff_url }}" > pr.diff
 
+      - name: Debug - Check diff content
+        run: |
+          echo "📏 Full diff size: $(wc -c < pr.diff) bytes"
+          echo "📝 First 500 characters of diff:"
+          head -c 500 pr.diff
+          echo ""
+          echo "📊 Files in diff:"
+          grep '^diff --git' pr.diff || echo "No diff entries found"
+
       - name: Run DeepSeek review
         id: review
         run: |
           sudo apt-get update && sudo apt-get install -y jq
 
-          # Filter to only code files
-          cat pr.diff | \
-            grep -E '^diff --git a/.*\.(py|js|ts|go|rs|java|cpp|h|sh|rb|php|html|css|sql)$' > pr.diff.filtered
-          
-          if [ ! -s pr.diff.filtered ]; then
-            echo "✅ No code changes to review" > review.txt
+          # If diff is empty, exit early
+          if [ ! -s pr.diff ]; then
+            echo "✅ PR diff is empty. Nothing to review." > review.txt
             exit 0
           fi
 
+          # Use the FULL diff - don't filter it
+          # The AI should handle identifying code vs non-code files
+          cat pr.diff > pr.diff.full
+
           cat > prompt.txt << 'EOF'
-          You are a senior code reviewer. Review the following code changes.
+          You are a senior code reviewer. Review the following code diff.
 
           CRITICAL RULES:
           1. DO NOT summarize what the code does.
-          2. ONLY point out SPECIFIC problems.
+          2. ONLY point out SPECIFIC problems in the code changes.
           3. For each problem, provide:
              - The EXACT file name
-             - The EXACT problematic code line
+             - The EXACT problematic code line (copy the code)
              - WHY it's a problem
              - HOW to fix it
           4. Focus on: bugs, security flaws, performance issues, bad practices.
-          5. If you find no issues, output: "✅ No issues found."
+          5. If you find no issues, output: "✅ No issues found. The code looks good."
 
           FORMAT (MUST FOLLOW EXACTLY):
           ### FILE: filename.py
@@ -59,16 +69,22 @@ jobs:
           - PROBLEM: [what's wrong]
           - FIX: [how to fix]
 
+          ### FILE: another.py
+          - CODE: [the exact problematic line]
+          - PROBLEM: [what's wrong]
+          - FIX: [how to fix]
+
           Code diff to review:
           EOF
 
-          cat pr.diff.filtered >> prompt.txt
+          cat pr.diff.full >> prompt.txt
 
+          # Create JSON payload for DeepSeek API
           cat > payload.json << JSONEOF
           {
             "model": "deepseek-chat",
             "messages": [
-              {"role": "system", "content": "You are a harsh code reviewer. Only output issues in the exact format specified."},
+              {"role": "system", "content": "You are a harsh code reviewer. Only output issues in the exact format specified. If the diff is empty or only contains binary files, output exactly: '✅ No code changes to review.'"},
               {"role": "user", "content": $(jq -Rs . < prompt.txt)}
             ],
             "temperature": 0.1,
@@ -76,14 +92,17 @@ jobs:
           }
           JSONEOF
 
+          # Call DeepSeek API
           curl -s -X POST https://api.deepseek.com/v1/chat/completions \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.DEEPSEEK_API_KEY }}" \
             -d @payload.json > response.json
 
+          # Extract the response
           jq -r '.choices[0].message.content' response.json > review.txt
 
-          rm -f prompt.txt payload.json response.json pr.diff.filtered
+          # Clean up
+          rm -f prompt.txt payload.json response.json pr.diff.full
 
       - name: Post structured review
         uses: actions/github-script@v7
@@ -91,7 +110,20 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
+            
+            // Check if review file exists
+            if (!fs.existsSync('review.txt')) {
+              console.log('⚠️ review.txt not found');
+              return;
+            }
+            
             const review = fs.readFileSync('review.txt', 'utf8');
+            
+            // If review is empty, skip
+            if (!review || review.trim() === '') {
+              console.log('⚠️ Review is empty');
+              return;
+            }
             
             // Format as markdown with better structure
             const formattedReview = review
