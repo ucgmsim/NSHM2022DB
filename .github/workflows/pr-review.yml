@@ -106,7 +106,8 @@ jobs:
           # Clean up
           rm -f prompt.txt payload.json response.json pr.diff.full
 
-      - name: Post inline comments
+
+      - name: Post inline review comments
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -119,28 +120,36 @@ jobs:
               return;
             }
             
-            // Helper to extract code snippets and issues
+            // Parse the review text to extract issues
             function parseReview(text) {
               const issues = [];
               const blocks = text.split(/### FILE:/);
+              
               for (const block of blocks) {
                 if (!block.trim()) continue;
+                
                 const lines = block.split('\n');
-                // First line is the file name
                 const fileLine = lines[0].trim();
                 if (!fileLine) continue;
-                // Sometimes the filename might have extra chars, clean it
-                const filePath = fileLine.replace(/^['"]?|['"]?$/g, '').trim();
-                // Extract content
+                
+                // Extract filename, handling various formats
+                let filePath = fileLine.replace(/^['"]?|['"]?$/g, '').trim();
+                // Remove any trailing ":" or "```" artifacts
+                filePath = filePath.replace(/[:\s]+$/, '');
+                
                 const content = lines.slice(1).join('\n');
-                // Find sections: - CODE: ..., - PROBLEM: ..., - FIX: ...
-                const codeMatch = content.match(/- CODE:\s*(.+?)(?=\n- PROBLEM:|\n- FIX:|\n---|$)/is);
-                const problemMatch = content.match(/- PROBLEM:\s*(.+?)(?=\n- CODE:|\n- FIX:|\n---|$)/is);
-                const fixMatch = content.match(/- FIX:\s*(.+?)(?=\n- CODE:|\n- PROBLEM:|\n---|$)/is);
-                if (codeMatch && problemMatch && fixMatch) {
+                
+                // Extract CODE, PROBLEM, FIX (and optionally LINE)
+                const lineMatch = content.match(/- LINE:\s*(.+?)(?=\n- CODE:|\n- PROBLEM:|\n- FIX:|$)/is);
+                const codeMatch = content.match(/- CODE:\s*(.+?)(?=\n- LINE:|\n- PROBLEM:|\n- FIX:|$)/is);
+                const problemMatch = content.match(/- PROBLEM:\s*(.+?)(?=\n- CODE:|\n- LINE:|\n- FIX:|$)/is);
+                const fixMatch = content.match(/- FIX:\s*(.+?)(?=\n- CODE:|\n- LINE:|\n- PROBLEM:|$)/is);
+                
+                if (problemMatch && fixMatch) {
                   issues.push({
                     path: filePath,
-                    code: codeMatch[1].trim(),
+                    line: lineMatch ? parseInt(lineMatch[1].trim()) : null,
+                    code: codeMatch ? codeMatch[1].trim() : null,
                     problem: problemMatch[1].trim(),
                     fix: fixMatch[1].trim()
                   });
@@ -163,73 +172,97 @@ jobs:
               return;
             }
             
-            // For each issue, try to find the line number in the file
+            // Build review comments with line numbers
+            const reviewComments = [];
+            
             for (const issue of issues) {
               console.log(`📁 Processing ${issue.path}`);
-              let lineNumber = null;
+              let lineNumber = issue.line;
               
+              // If LINE wasn't provided, try to find the code in the file
+              if (!lineNumber && issue.code) {
+                try {
+                  const { data: fileContent } = await github.rest.repos.getContent({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    path: issue.path,
+                    ref: context.payload.pull_request.head.sha
+                  });
+                  
+                  const content = Buffer.from(fileContent.content, 'base64').toString('utf-8');
+                  const lines = content.split('\n');
+                  
+                  // Search for the code snippet
+                  const searchKey = issue.code.substring(0, 60);
+                  for (let i = 0; i < lines.length; i++) {
+                    if (lines[i].includes(searchKey)) {
+                      lineNumber = i + 1;
+                      break;
+                    }
+                  }
+                } catch (error) {
+                  console.log(`⚠️ Could not fetch ${issue.path}: ${error.message}`);
+                }
+              }
+              
+              // If we still don't have a line number, skip (fallback to regular comment)
+              if (!lineNumber) {
+                console.log(`⚠️ No line number found for ${issue.path}, skipping inline comment.`);
+                continue;
+              }
+              
+              reviewComments.push({
+                path: issue.path,
+                line: lineNumber,
+                side: 'RIGHT',
+                body: `**⚠️ Problem:** ${issue.problem}\n\n**✅ Fix:** ${issue.fix}`
+              });
+            }
+            
+            // If we have review comments, create the review
+            if (reviewComments.length > 0) {
               try {
-                // Fetch the file content from the PR head commit
-                const { data: fileContent } = await github.rest.repos.getContent({
+                const { data: reviewData } = await github.rest.pulls.createReview({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  path: issue.path,
-                  ref: context.payload.pull_request.head.sha
+                  pull_number: context.issue.number,
+                  body: '## 🤖 AI Code Review',
+                  event: 'COMMENT',
+                  comments: reviewComments
                 });
                 
-                const content = Buffer.from(fileContent.content, 'base64').toString('utf-8');
-                const lines = content.split('\n');
+                console.log(`✅ Created review with ${reviewComments.length} inline comments.`);
+              } catch (error) {
+                console.log(`❌ Failed to create review: ${error.message}`);
                 
-                // Search for the code snippet (allow some flexibility)
-                const searchLine = issue.code.trim();
-                // If the code is long, take first 50 chars for matching
-                const searchKey = searchLine.substring(0, 80);
-                
-                for (let i = 0; i < lines.length; i++) {
-                  if (lines[i].includes(searchKey)) {
-                    lineNumber = i + 1; // 1-indexed for GitHub
-                    break;
+                // Fallback: post individual comments
+                for (const comment of reviewComments) {
+                  try {
+                    await github.rest.pulls.createReviewComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number: context.issue.number,
+                      body: comment.body,
+                      path: comment.path,
+                      line: comment.line,
+                      side: 'RIGHT'
+                    });
+                  } catch (e) {
+                    console.log(`⚠️ Failed to post comment: ${e.message}`);
                   }
                 }
-                
-                if (lineNumber) {
-                  console.log(`✅ Found line ${lineNumber} for ${issue.path}`);
-                  // Post inline comment
-                  await github.rest.pulls.createReviewComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    pull_number: context.issue.number,
-                    body: `**⚠️ Problem:** ${issue.problem}\n\n**✅ Fix:** ${issue.fix}`,
-                    path: issue.path,
-                    line: lineNumber,
-                    side: 'RIGHT'
-                  });
-                } else {
-                  console.log(`⚠️ Could not locate line for ${issue.path}, posting as file comment.`);
-                  // Fallback: post as a general comment referencing the file
-                  await github.rest.issues.createComment({
-                    issue_number: context.issue.number,
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    body: `## 📁 ${issue.path}\n\n**💻 Code:** \`${issue.code}\`\n\n**⚠️ Problem:** ${issue.problem}\n\n**✅ Fix:** ${issue.fix}`
-                  });
-                }
-              } catch (error) {
-                console.log(`❌ Failed to fetch ${issue.path}: ${error.message}`);
-                // Fallback: post as a general comment
+              }
+            } else {
+              // No inline comments could be placed, post as regular issue comments
+              for (const issue of issues) {
                 await github.rest.issues.createComment({
                   issue_number: context.issue.number,
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  body: `## 📁 ${issue.path}\n\n**💻 Code:** \`${issue.code}\`\n\n**⚠️ Problem:** ${issue.problem}\n\n**✅ Fix:** ${issue.fix}`
+                  body: `## 📁 ${issue.path}\n\n**💻 Code:** \`${issue.code || 'N/A'}\`\n\n**⚠️ Problem:** ${issue.problem}\n\n**✅ Fix:** ${issue.fix}`
                 });
               }
             }
-            
-            // Optionally also post a summary comment
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## 🤖 DeepSeek Code Review Summary\n\nFound **${issues.length}** issues. See inline comments for details.`
-            });
+
+
+
