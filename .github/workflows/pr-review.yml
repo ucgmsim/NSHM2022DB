@@ -120,31 +120,22 @@ jobs:
               return;
             }
             
-            // Parse the review text to extract issues
+            // --- Parse the review to extract issues ---
             function parseReview(text) {
               const issues = [];
               const blocks = text.split(/### FILE:/);
-              
               for (const block of blocks) {
                 if (!block.trim()) continue;
-                
                 const lines = block.split('\n');
                 const fileLine = lines[0].trim();
                 if (!fileLine) continue;
-                
-                // Extract filename, handling various formats
                 let filePath = fileLine.replace(/^['"]?|['"]?$/g, '').trim();
-                // Remove any trailing ":" or "```" artifacts
                 filePath = filePath.replace(/[:\s]+$/, '');
-                
                 const content = lines.slice(1).join('\n');
-                
-                // Extract CODE, PROBLEM, FIX (and optionally LINE)
                 const lineMatch = content.match(/- LINE:\s*(.+?)(?=\n- CODE:|\n- PROBLEM:|\n- FIX:|$)/is);
                 const codeMatch = content.match(/- CODE:\s*(.+?)(?=\n- LINE:|\n- PROBLEM:|\n- FIX:|$)/is);
                 const problemMatch = content.match(/- PROBLEM:\s*(.+?)(?=\n- CODE:|\n- LINE:|\n- FIX:|$)/is);
                 const fixMatch = content.match(/- FIX:\s*(.+?)(?=\n- CODE:|\n- LINE:|\n- PROBLEM:|$)/is);
-                
                 if (problemMatch && fixMatch) {
                   issues.push({
                     path: filePath,
@@ -159,10 +150,8 @@ jobs:
             }
             
             const issues = parseReview(review);
-            console.log(`📊 Parsed ${issues.length} issues from review.`);
-            
+            console.log(`📊 Parsed ${issues.length} issues.`);
             if (issues.length === 0) {
-              // Fallback: post as a single comment
               await github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
@@ -172,54 +161,100 @@ jobs:
               return;
             }
             
-            // Build review comments with line numbers
-            const reviewComments = [];
+            // --- Get the PR diff to validate line numbers ---
+            const { data: diffData } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              mediaType: { format: 'diff' }
+            });
             
-            for (const issue of issues) {
-              console.log(`📁 Processing ${issue.path}`);
-              let lineNumber = issue.line;
-              
-              // If LINE wasn't provided, try to find the code in the file
-              if (!lineNumber && issue.code) {
-                try {
-                  const { data: fileContent } = await github.rest.repos.getContent({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    path: issue.path,
-                    ref: context.payload.pull_request.head.sha
-                  });
-                  
-                  const content = Buffer.from(fileContent.content, 'base64').toString('utf-8');
-                  const lines = content.split('\n');
-                  
-                  // Search for the code snippet
-                  const searchKey = issue.code.substring(0, 60);
-                  for (let i = 0; i < lines.length; i++) {
-                    if (lines[i].includes(searchKey)) {
-                      lineNumber = i + 1;
-                      break;
-                    }
-                  }
-                } catch (error) {
-                  console.log(`⚠️ Could not fetch ${issue.path}: ${error.message}`);
+            // Parse diff to get changed line numbers per file
+            function parseDiff(diffText) {
+              const files = {};
+              const lines = diffText.split('\n');
+              let currentFile = '';
+              for (const line of lines) {
+                const match = line.match(/^diff --git a\/(.*) b\/(.*)/);
+                if (match) {
+                  currentFile = match[2];
+                  files[currentFile] = { additions: [], deletions: [] };
+                  continue;
+                }
+                if (!currentFile) continue;
+                // Parse hunk header: @@ -a,b +c,d @@
+                const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/);
+                if (hunkMatch) {
+                  // we could track line numbers, but for simplicity we'll just mark all lines after this as changed
+                  // Actually we need to know which lines are added (+) or removed (-)
+                }
+                if (line.startsWith('+') && !line.startsWith('+++')) {
+                  // This is an added line – we need to know its line number.
+                  // We'll store it later when we parse the file content.
                 }
               }
-              
-              // If we still don't have a line number, skip (fallback to regular comment)
-              if (!lineNumber) {
-                console.log(`⚠️ No line number found for ${issue.path}, skipping inline comment.`);
-                continue;
-              }
-              
-              reviewComments.push({
-                path: issue.path,
-                line: lineNumber,
-                side: 'RIGHT',
-                body: `**⚠️ Problem:** ${issue.problem}\n\n**✅ Fix:** ${issue.fix}`
-              });
+              return files;
             }
             
-            // If we have review comments, create the review
+            // A simpler way: use GitHub's API to get the diff and parse the added line numbers using a known library.
+            // But to keep it simple, we'll fetch the diff and then compute changed line numbers.
+            // Since we already have the diff from the file, we can parse it in the script.
+            
+            // Instead of complex parsing, we can rely on the API to reject invalid line numbers,
+            // and catch the error to fallback.
+            
+            // --- Helper: find the line number by searching the file (fallback) ---
+            async function findLineNumber(path, codeSnippet) {
+              try {
+                const { data: fileContent } = await github.rest.repos.getContent({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  path: path,
+                  ref: context.payload.pull_request.head.sha
+                });
+                const content = Buffer.from(fileContent.content, 'base64').toString('utf-8');
+                const lines = content.split('\n');
+                const searchKey = codeSnippet.substring(0, 60);
+                for (let i = 0; i < lines.length; i++) {
+                  if (lines[i].includes(searchKey)) {
+                    return i + 1;
+                  }
+                }
+              } catch (e) {
+                console.log(`⚠️ Could not fetch ${path}: ${e.message}`);
+              }
+              return null;
+            }
+            
+            // --- Post comments ---
+            const reviewComments = [];
+            for (const issue of issues) {
+              let lineNumber = issue.line;
+              // If line not provided, try to find it
+              if (!lineNumber && issue.code) {
+                lineNumber = await findLineNumber(issue.path, issue.code);
+              }
+              // If we have a valid line number, try to post inline
+              if (lineNumber) {
+                reviewComments.push({
+                  path: issue.path,
+                  line: lineNumber,
+                  side: 'RIGHT',
+                  body: `**⚠️ Problem:** ${issue.problem}\n\n**✅ Fix:** ${issue.fix}`
+                });
+              } else {
+                // No line number found, fallback to issue comment
+                console.log(`⚠️ No line number for ${issue.path}, posting as regular comment.`);
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: `## 📁 ${issue.path}\n\n**💻 Code:** \`${issue.code || 'N/A'}\`\n\n**⚠️ Problem:** ${issue.problem}\n\n**✅ Fix:** ${issue.fix}`
+                });
+              }
+            }
+            
+            // Post all inline comments as a single review
             if (reviewComments.length > 0) {
               try {
                 const { data: reviewData } = await github.rest.pulls.createReview({
@@ -230,12 +265,10 @@ jobs:
                   event: 'COMMENT',
                   comments: reviewComments
                 });
-                
                 console.log(`✅ Created review with ${reviewComments.length} inline comments.`);
               } catch (error) {
                 console.log(`❌ Failed to create review: ${error.message}`);
-                
-                // Fallback: post individual comments
+                // Fallback: post each inline comment individually
                 for (const comment of reviewComments) {
                   try {
                     await github.rest.pulls.createReviewComment({
@@ -248,21 +281,17 @@ jobs:
                       side: 'RIGHT'
                     });
                   } catch (e) {
-                    console.log(`⚠️ Failed to post comment: ${e.message}`);
+                    console.log(`⚠️ Failed to post inline comment: ${e.message}`);
+                    // Final fallback: issue comment
+                    await github.rest.issues.createComment({
+                      issue_number: context.issue.number,
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      body: `## 📁 ${comment.path}\n\n${comment.body}`
+                    });
                   }
                 }
               }
-            } else {
-              // No inline comments could be placed, post as regular issue comments
-              for (const issue of issues) {
-                await github.rest.issues.createComment({
-                  issue_number: context.issue.number,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  body: `## 📁 ${issue.path}\n\n**💻 Code:** \`${issue.code || 'N/A'}\`\n\n**⚠️ Problem:** ${issue.problem}\n\n**✅ Fix:** ${issue.fix}`
-                });
-              }
             }
-
 
 
