@@ -47,8 +47,8 @@ jobs:
           echo "📏 Original diff size: $DIFF_SIZE bytes"
           
           # The model has a ~262k token limit. As a rough estimate, 1 token ≈ 4 characters.
-          # So we target ~200k tokens ≈ 800,000 bytes to leave room for the prompt overhead.
-          MAX_BYTES=800000
+          # So we target ~250k tokens ≈ 400,000 bytes to leave room for the prompt overhead.
+          MAX_BYTES=300000
           
           if [ "$DIFF_SIZE" -gt "$MAX_BYTES" ]; then
             echo "⚠️ Diff is too large ($DIFF_SIZE bytes). Truncating to $MAX_BYTES bytes."
