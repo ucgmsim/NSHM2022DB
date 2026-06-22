@@ -25,15 +25,12 @@ jobs:
             -H "Accept: application/vnd.github.v3.diff" \
             "${{ github.event.pull_request.diff_url }}" > pr.diff
 
-      - name: Debug - Check diff content
+      - name: Debug - Original diff size
         run: |
-          echo "📏 Full diff size: $(wc -c < pr.diff) bytes"
-          echo "📝 First 500 characters of diff:"
-          head -c 500 pr.diff
-          echo ""
+          echo "📏 Original diff size: $(wc -c < pr.diff) bytes"
           echo "📊 Files in diff:"
-          grep '^diff --git' pr.diff || echo "No diff entries found"
-
+          grep '^diff --git' pr.diff | wc -l || echo "No diff entries found"
+      
 
       - name: Run Ollama Cloud review
         id: review
@@ -43,6 +40,25 @@ jobs:
           if [ ! -s pr.diff ]; then
             echo "✅ PR diff is empty. Nothing to review." > review.txt
             exit 0
+          fi
+      
+          # --- 0. Truncate the diff if it's too large ---
+          DIFF_SIZE=$(wc -c < pr.diff)
+          echo "📏 Original diff size: $DIFF_SIZE bytes"
+          
+          # The model has a ~262k token limit. As a rough estimate, 1 token ≈ 4 characters.
+          # So we target ~200k tokens ≈ 800,000 bytes to leave room for the prompt overhead.
+          MAX_BYTES=800000
+          
+          if [ "$DIFF_SIZE" -gt "$MAX_BYTES" ]; then
+            echo "⚠️ Diff is too large ($DIFF_SIZE bytes). Truncating to $MAX_BYTES bytes."
+            head -c "$MAX_BYTES" pr.diff > pr.diff.truncated
+            mv pr.diff.truncated pr.diff
+            echo "⚠️ Diff truncated. Last 100 characters of truncated diff:"
+            tail -c 100 pr.diff
+            echo ""
+          else
+            echo "✅ Diff size OK"
           fi
       
           # --- 1. Create the prompt ---
@@ -73,7 +89,6 @@ jobs:
           cat pr.diff >> prompt.txt
       
           # --- 2. Build the JSON payload safely ---
-          # Use jq to create the payload from scratch, which handles escaping automatically.
           jq -n \
             --arg model "gemma4:31b-cloud" \
             --rawfile prompt prompt.txt \
@@ -90,13 +105,11 @@ jobs:
               }
             }' > payload.json
       
-          # --- 3. Debug: Show the payload being sent (first 500 chars) ---
-          echo "📤 Sending payload (first 500 chars):"
-          head -c 500 payload.json
-          echo ""
+          # --- 3. Debug: Show the payload size ---
+          PAYLOAD_SIZE=$(wc -c < payload.json)
+          echo "📤 Payload size: $PAYLOAD_SIZE bytes"
       
           # --- 4. Call the Ollama Cloud API ---
-          # The correct base URL is https://ollama.com/api
           curl -s -w "\n%{http_code}" -X POST https://ollama.com/api/chat \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.OLLAMA_API_KEY }}" \
@@ -104,7 +117,6 @@ jobs:
       
           # --- 5. Check the response ---
           HTTP_STATUS=$(tail -n1 response_with_status.txt)
-          # Remove the status line from the response body
           head -n -1 response_with_status.txt > response.json
       
           echo "📥 HTTP Status: $HTTP_STATUS"
@@ -130,12 +142,12 @@ jobs:
           # --- 6. Extract the review ---
           jq -r '.message.content' response.json > review.txt
       
-          # Debug: show first 500 characters of the review
-          echo "📝 Review preview (first 500 chars):"
+          echo "📝 Review extracted successfully. First 500 chars:"
           head -c 500 review.txt
           echo ""
       
           rm -f prompt.txt payload.json response.json response_with_status.txt
+      
       - name: Post inline review comments
         uses: actions/github-script@v7
         with:
