@@ -30,21 +30,20 @@ jobs:
           echo "📏 Original diff size: $(wc -c < pr.diff) bytes"
           echo "📊 Files in diff:"
           grep '^diff --git' pr.diff | wc -l || echo "No diff entries found"
-      
 
       - name: Run Ollama Cloud review
         id: review
         run: |
-          # Ensure jq is installed (if not, install it once on the runner)
+          # Ensure jq is installed
           if ! command -v jq &> /dev/null; then
             sudo apt-get update && sudo apt-get install -y jq
           fi
-      
+
           if [ ! -s pr.diff ]; then
             echo "✅ PR diff is empty. Nothing to review." > review.txt
             exit 0
           fi
-      
+
           DIFF_SIZE=$(wc -c < pr.diff)
           echo "📏 Original diff size: $DIFF_SIZE bytes"
           MAX_BYTES=1100000
@@ -55,8 +54,8 @@ jobs:
           else
             echo "✅ Diff size OK"
           fi
-      
-          # Create prompt (unchanged)
+
+          # Create prompt
           cat > prompt.txt << 'EOF'
           You are a senior code reviewer. Review the following code diff.
           CRITICAL RULES:
@@ -78,9 +77,13 @@ jobs:
           Code diff to review:
           EOF
           cat pr.diff >> prompt.txt
-      
-          # Build payload (using clean single-line jq to avoid errors)
-          jq -n --arg model "deepseek-v4-pro:cloud" --rawfile prompt prompt.txt '{
+
+          # Save model name for later use in comments
+          MODEL_NAME="deepseek-v4-pro:cloud"
+          echo "$MODEL_NAME" > model.txt
+
+          # Build payload
+          jq -n --arg model "$MODEL_NAME" --rawfile prompt prompt.txt '{
             model: $model,
             messages: [
               { role: "system", content: "You are a harsh code reviewer. Only output issues in the exact format specified." },
@@ -92,42 +95,39 @@ jobs:
               num_predict: 4000
             }
           }' > payload.json
-      
+
           PAYLOAD_SIZE=$(wc -c < payload.json)
           echo "📤 Payload size: $PAYLOAD_SIZE bytes"
-      
-          # Call API with verbose output (include headers)
+
+          # Call API
           curl -s -w "\n%{http_code}" -X POST https://ollama.com/api/chat \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.OLLAMA_API_KEY }}" \
             -d @payload.json > response_with_status.txt
-      
+
           HTTP_STATUS=$(tail -n1 response_with_status.txt)
           head -n -1 response_with_status.txt > response.json
-      
+
           echo "📥 HTTP Status: $HTTP_STATUS"
-      
+
           if [ "$HTTP_STATUS" != "200" ]; then
             echo "❌ API request failed with status $HTTP_STATUS"
             echo "📝 Response body:"
             cat response.json
             echo "❌ API request failed" > review.txt
-            rm -f prompt.txt payload.json response.json response_with_status.txt
+            rm -f prompt.txt payload.json response.json response_with_status.txt model.txt
             exit 1
           fi
-      
-          # ---- Debug: Show the entire response (for troubleshooting) ----
+
           echo "📄 Full API response:"
           cat response.json
-      
-          # ---- Extract content robustly ----
-          # Try the standard Ollama 'message.content' path
+
+          # Extract content
           CONTENT=$(jq -r '.message.content // ""' response.json)
           if [ -z "$CONTENT" ]; then
-            # Fallback: try OpenAI-style 'choices[0].message.content'
             CONTENT=$(jq -r '.choices[0].message.content // ""' response.json)
           fi
-      
+
           if [ -z "$CONTENT" ]; then
             echo "⚠️ No content found in response. Full response shown above."
             echo "❌ No review content" > review.txt
@@ -137,10 +137,9 @@ jobs:
             head -c 500 review.txt
             echo ""
           fi
-      
+
           rm -f prompt.txt payload.json response.json response_with_status.txt
 
-     
       - name: Post inline review comments
         uses: actions/github-script@v7
         with:
@@ -148,12 +147,21 @@ jobs:
           script: |
             const fs = require('fs');
             const review = fs.readFileSync('review.txt', 'utf8');
-            
+
+            // Read the model name from the file saved earlier
+            const model = fs.existsSync('model.txt') ? fs.readFileSync('model.txt', 'utf8').trim() : 'unknown';
+
             if (!review || review.trim() === '') {
               console.log('⚠️ Review is empty, skipping.');
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## 🤖 AI Code Review (${model})\n\n⚠️ No review content was generated.`
+              });
               return;
             }
-            
+
             // --- Parse the review to extract issues ---
             function parseReview(text) {
               const issues = [];
@@ -182,19 +190,20 @@ jobs:
               }
               return issues;
             }
-            
+
             const issues = parseReview(review);
             console.log(`📊 Parsed ${issues.length} issues.`);
             if (issues.length === 0) {
+              // If no issues parsed, post the raw review with model name
               await github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: `## 🤖 AI Code Review\n\n${review}`
+                body: `## 🤖 AI Code Review (${model})\n\n${review}`
               });
               return;
             }
-            
+
             // --- Helper: find the line number by searching the file (fallback) ---
             async function findLineNumber(path, codeSnippet) {
               try {
@@ -217,7 +226,7 @@ jobs:
               }
               return null;
             }
-            
+
             // --- Post comments ---
             const reviewComments = [];
             for (const issue of issues) {
@@ -235,17 +244,17 @@ jobs:
                   body: `**⚠️ Problem:** ${issue.problem}\n\n**✅ Fix:** ${issue.fix}`
                 });
               } else {
-                // No line number found, fallback to issue comment
+                // No line number found, fallback to issue comment with model name
                 console.log(`⚠️ No line number for ${issue.path}, posting as regular comment.`);
                 await github.rest.issues.createComment({
                   issue_number: context.issue.number,
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  body: `## 📁 ${issue.path}\n\n**💻 Code:** \`${issue.code || 'N/A'}\`\n\n**⚠️ Problem:** ${issue.problem}\n\n**✅ Fix:** ${issue.fix}`
+                  body: `## 📁 ${issue.path} (${model})\n\n**💻 Code:** \`${issue.code || 'N/A'}\`\n\n**⚠️ Problem:** ${issue.problem}\n\n**✅ Fix:** ${issue.fix}`
                 });
               }
             }
-            
+
             // Post all inline comments as a single review
             if (reviewComments.length > 0) {
               try {
@@ -253,7 +262,7 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   pull_number: context.issue.number,
-                  body: '## 🤖 AI Code Review',
+                  body: `## 🤖 AI Code Review (${model})`,
                   event: 'COMMENT',
                   comments: reviewComments
                 });
@@ -274,14 +283,30 @@ jobs:
                     });
                   } catch (e) {
                     console.log(`⚠️ Failed to post inline comment: ${e.message}`);
-                    // Final fallback: issue comment
+                    // Final fallback: issue comment with model name
                     await github.rest.issues.createComment({
                       issue_number: context.issue.number,
                       owner: context.repo.owner,
                       repo: context.repo.repo,
-                      body: `## 📁 ${comment.path}\n\n${comment.body}`
+                      body: `## 📁 ${comment.path} (${model})\n\n${comment.body}`
                     });
                   }
                 }
               }
             }
+
+            // Also post a summary comment if inline comments were created
+            if (reviewComments.length > 0) {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## 🤖 AI Code Review (${model})\n\nFound **${reviewComments.length}** issues. See inline comments for details.`
+              });
+            }
+
+            // Clean up model.txt (optional, since it's on the runner)
+            if (fs.existsSync('model.txt')) {
+              fs.unlinkSync('model.txt');
+            }
+
