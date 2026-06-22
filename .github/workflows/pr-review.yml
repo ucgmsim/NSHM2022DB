@@ -35,34 +35,30 @@ jobs:
       - name: Run Ollama Cloud review
         id: review
         run: |
+          # Ensure jq is installed (if not, install it once on the runner)
+          if ! command -v jq &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
       
           if [ ! -s pr.diff ]; then
             echo "✅ PR diff is empty. Nothing to review." > review.txt
             exit 0
           fi
       
-          # --- 0. Truncate the diff if it's too large ---
           DIFF_SIZE=$(wc -c < pr.diff)
           echo "📏 Original diff size: $DIFF_SIZE bytes"
-          
-          # The model has a ~1M token limit. As a rough estimate, 1 token ≈ 1 character.
           MAX_BYTES=1100000
-          
           if [ "$DIFF_SIZE" -gt "$MAX_BYTES" ]; then
-            echo "⚠️ Diff is too large ($DIFF_SIZE bytes). Truncating to $MAX_BYTES bytes."
+            echo "⚠️ Diff is too large. Truncating to $MAX_BYTES bytes."
             head -c "$MAX_BYTES" pr.diff > pr.diff.truncated
             mv pr.diff.truncated pr.diff
-            echo "⚠️ Diff truncated. Last 100 characters of truncated diff:"
-            tail -c 100 pr.diff
-            echo ""
           else
             echo "✅ Diff size OK"
           fi
       
-          # --- 1. Create the prompt ---
+          # Create prompt (unchanged)
           cat > prompt.txt << 'EOF'
           You are a senior code reviewer. Review the following code diff.
-      
           CRITICAL RULES:
           1. DO NOT summarize what the code does.
           2. ONLY point out SPECIFIC problems in the code changes.
@@ -73,20 +69,17 @@ jobs:
              - HOW to fix it
           4. Focus on: bugs, security flaws, performance issues, bad practices.
           5. If you find no issues, output: "✅ No issues found. The code looks good."
-      
           FORMAT (MUST FOLLOW EXACTLY):
           ### FILE: filename.py
           - LINE: [line number if available]
           - CODE: [the exact problematic line]
           - PROBLEM: [what's wrong]
           - FIX: [how to fix]
-      
           Code diff to review:
           EOF
-      
           cat pr.diff >> prompt.txt
       
-          # --- 2. Build the JSON payload safely ---
+          # Build payload (using clean single-line jq to avoid errors)
           jq -n --arg model "deepseek-v4-pro:cloud" --rawfile prompt prompt.txt '{
             model: $model,
             messages: [
@@ -99,19 +92,16 @@ jobs:
               num_predict: 4000
             }
           }' > payload.json
- 
-     
-          # --- 3. Debug: Show the payload size ---
+      
           PAYLOAD_SIZE=$(wc -c < payload.json)
           echo "📤 Payload size: $PAYLOAD_SIZE bytes"
       
-          # --- 4. Call the Ollama Cloud API ---
+          # Call API with verbose output (include headers)
           curl -s -w "\n%{http_code}" -X POST https://ollama.com/api/chat \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.OLLAMA_API_KEY }}" \
             -d @payload.json > response_with_status.txt
       
-          # --- 5. Check the response ---
           HTTP_STATUS=$(tail -n1 response_with_status.txt)
           head -n -1 response_with_status.txt > response.json
       
@@ -126,24 +116,31 @@ jobs:
             exit 1
           fi
       
-          # Check if the response has the expected structure
-          if ! jq -e '.message.content' response.json > /dev/null 2>&1; then
-            echo "❌ Response missing 'message.content'. Full response:"
-            cat response.json
-            echo "❌ No content in response" > review.txt
-            rm -f prompt.txt payload.json response.json response_with_status.txt
-            exit 1
+          # ---- Debug: Show the entire response (for troubleshooting) ----
+          echo "📄 Full API response:"
+          cat response.json
+      
+          # ---- Extract content robustly ----
+          # Try the standard Ollama 'message.content' path
+          CONTENT=$(jq -r '.message.content // ""' response.json)
+          if [ -z "$CONTENT" ]; then
+            # Fallback: try OpenAI-style 'choices[0].message.content'
+            CONTENT=$(jq -r '.choices[0].message.content // ""' response.json)
           fi
       
-          # --- 6. Extract the review ---
-          jq -r '.message.content' response.json > review.txt
-      
-          echo "📝 Review extracted successfully. First 500 chars:"
-          head -c 500 review.txt
-          echo ""
+          if [ -z "$CONTENT" ]; then
+            echo "⚠️ No content found in response. Full response shown above."
+            echo "❌ No review content" > review.txt
+          else
+            echo "$CONTENT" > review.txt
+            echo "📝 Review extracted successfully. First 500 chars:"
+            head -c 500 review.txt
+            echo ""
+          fi
       
           rm -f prompt.txt payload.json response.json response_with_status.txt
-      
+
+     
       - name: Post inline review comments
         uses: actions/github-script@v7
         with:
