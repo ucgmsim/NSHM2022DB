@@ -34,20 +34,19 @@ jobs:
           echo "📊 Files in diff:"
           grep '^diff --git' pr.diff || echo "No diff entries found"
 
-
-      - name: Run Ollama review
+      - name: Run Ollama Cloud review
         id: review
         run: |
           sudo apt-get update && sudo apt-get install -y jq
-      
+
           if [ ! -s pr.diff ]; then
             echo "✅ PR diff is empty. Nothing to review." > review.txt
             exit 0
           fi
-      
+
           cat > prompt.txt << 'EOF'
           You are a senior code reviewer. Review the following code diff.
-      
+
           CRITICAL RULES:
           1. DO NOT summarize what the code does.
           2. ONLY point out SPECIFIC problems in the code changes.
@@ -58,17 +57,17 @@ jobs:
              - HOW to fix it
           4. Focus on: bugs, security flaws, performance issues, bad practices.
           5. If you find no issues, output: "✅ No issues found. The code looks good."
-      
+
           FORMAT (MUST FOLLOW EXACTLY):
           ### FILE: filename.py
           - LINE: [line number if available]
           - CODE: [the exact problematic line]
           - PROBLEM: [what's wrong]
           - FIX: [how to fix]
-      
+
           Code diff to review:
           EOF
-      
+
           cat pr.diff >> prompt.txt
 
           # Build JSON payload for Ollama Cloud API
@@ -85,91 +84,18 @@ jobs:
               "num_predict": 4000
             }
           }
-      
-          # Call local Ollama
+          JSONEOF
+
+          # Call Ollama Cloud API
           curl -s -X POST https://ollama.com/api/chat \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.OLLAMA_API_KEY }}" \
             -d @payload.json > response.json
-      
-          # Extract the response (local Ollama returns "message.content")
+
+          # Extract the response
           jq -r '.message.content' response.json > review.txt
-      
+
           rm -f prompt.txt payload.json response.json
-
-
-#      - name: Run DeepSeek review
-#        id: review
-#        run: |
-#          sudo apt-get update && sudo apt-get install -y jq
-#
-#          # If diff is empty, exit early
-#          if [ ! -s pr.diff ]; then
-#            echo "✅ PR diff is empty. Nothing to review." > review.txt
-#            exit 0
-#          fi
-#
-#          # Use the FULL diff - don't filter it
-#          # The AI should handle identifying code vs non-code files
-#          cat pr.diff > pr.diff.full
-#
-#          cat > prompt.txt << 'EOF'
-#          You are a senior code reviewer. Review the following code diff.
-#
-#          CRITICAL RULES:
-#          1. DO NOT summarize what the code does.
-#          2. ONLY point out SPECIFIC problems in the code changes.
-#          3. For each problem, provide:
-#             - The EXACT file name
-#             - The EXACT line number (if available from the diff) – look for the line number in the diff metadata (e.g., @@ -1,5 +1,6 @@) and use it.
-#             - The EXACT problematic code line (copy the code)
-#             - WHY it's a problem
-#             - HOW to fix it
-#          4. Focus on: bugs, security flaws, performance issues, bad practices.
-#          5. If you find no issues, output: "✅ No issues found. The code looks good."
-#
-#          FORMAT (MUST FOLLOW EXACTLY):
-#          ### FILE: filename.py
-#          - LINE: 42
-#          - CODE: [the exact problematic line]
-#          - PROBLEM: [what's wrong]
-#          - FIX: [how to fix]
-#
-#          ### FILE: another.py
-#          - CODE: [the exact problematic line]
-#          - PROBLEM: [what's wrong]
-#          - FIX: [how to fix]
-#
-#          Code diff to review:
-#          EOF
-#
-#          cat pr.diff.full >> prompt.txt
-#
-#          # Create JSON payload for DeepSeek API
-#          cat > payload.json << JSONEOF
-#          {
-#            "model": "deepseek-chat",
-#            "messages": [
-#              {"role": "system", "content": "You are a harsh code reviewer. Only output issues in the exact format specified. If the diff is empty or only contains binary files, output exactly: '✅ No code changes to review.'"},
-#              {"role": "user", "content": $(jq -Rs . < prompt.txt)}
-#            ],
-#            "temperature": 0.1,
-#            "max_tokens": 4000
-#          }
-#          JSONEOF
-#
-#          # Call DeepSeek API
-#          curl -s -X POST https://api.deepseek.com/v1/chat/completions \
-#            -H "Content-Type: application/json" \
-#            -H "Authorization: Bearer ${{ secrets.DEEPSEEK_API_KEY }}" \
-#            -d @payload.json > response.json
-#
-#          # Extract the response
-#          jq -r '.choices[0].message.content' response.json > review.txt
-#
-#          # Clean up
-#          rm -f prompt.txt payload.json response.json pr.diff.full
-
 
       - name: Post inline review comments
         uses: actions/github-script@v7
@@ -220,52 +146,10 @@ jobs:
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: `## 🤖 DeepSeek Code Review\n\n${review}`
+                body: `## 🤖 AI Code Review\n\n${review}`
               });
               return;
             }
-            
-            // --- Get the PR diff to validate line numbers ---
-            const { data: diffData } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number,
-              mediaType: { format: 'diff' }
-            });
-            
-            // Parse diff to get changed line numbers per file
-            function parseDiff(diffText) {
-              const files = {};
-              const lines = diffText.split('\n');
-              let currentFile = '';
-              for (const line of lines) {
-                const match = line.match(/^diff --git a\/(.*) b\/(.*)/);
-                if (match) {
-                  currentFile = match[2];
-                  files[currentFile] = { additions: [], deletions: [] };
-                  continue;
-                }
-                if (!currentFile) continue;
-                // Parse hunk header: @@ -a,b +c,d @@
-                const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/);
-                if (hunkMatch) {
-                  // we could track line numbers, but for simplicity we'll just mark all lines after this as changed
-                  // Actually we need to know which lines are added (+) or removed (-)
-                }
-                if (line.startsWith('+') && !line.startsWith('+++')) {
-                  // This is an added line – we need to know its line number.
-                  // We'll store it later when we parse the file content.
-                }
-              }
-              return files;
-            }
-            
-            // A simpler way: use GitHub's API to get the diff and parse the added line numbers using a known library.
-            // But to keep it simple, we'll fetch the diff and then compute changed line numbers.
-            // Since we already have the diff from the file, we can parse it in the script.
-            
-            // Instead of complex parsing, we can rely on the API to reject invalid line numbers,
-            // and catch the error to fallback.
             
             // --- Helper: find the line number by searching the file (fallback) ---
             async function findLineNumber(path, codeSnippet) {
@@ -357,5 +241,3 @@ jobs:
                 }
               }
             }
-
-
