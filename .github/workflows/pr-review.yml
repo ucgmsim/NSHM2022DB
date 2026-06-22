@@ -70,24 +70,26 @@ jobs:
           EOF
       
           cat pr.diff >> prompt.txt
-      
-          # Build JSON payload for local Ollama (chat endpoint)
-          jq -n --rawfile prompt prompt.txt '{
-            model: "deepseek-coder-v2:16b",   # or "qwen2.5-coder:14b"
-            messages: [
-              { role: "system", content: "You are a harsh code reviewer. Only output issues in the exact format specified." },
-              { role: "user", content: $prompt }
+
+          # Build JSON payload for Ollama Cloud API
+          cat > payload.json << JSONEOF
+          {
+            "model": "gemma4:31b-cloud",
+            "messages": [
+              {"role": "system", "content": "You are a harsh code reviewer. Only output issues in the exact format specified."},
+              {"role": "user", "content": $(jq -Rs . < prompt.txt)}
             ],
-            stream: false,
-            options: {
-              temperature: 0.1,
-              num_predict: 4000
+            "stream": false,
+            "options": {
+              "temperature": 0.1,
+              "num_predict": 4000
             }
-          }' > payload.json
+          }
       
           # Call local Ollama
-          curl -s -X POST http://localhost:11434/api/chat \
+          curl -s -X POST https://ollama.com/api/chat \
             -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.OLLAMA_API_KEY }}" \
             -d @payload.json > response.json
       
           # Extract the response (local Ollama returns "message.content")
