@@ -34,19 +34,21 @@ jobs:
           echo "📊 Files in diff:"
           grep '^diff --git' pr.diff || echo "No diff entries found"
 
+
       - name: Run Ollama Cloud review
         id: review
         run: |
           sudo apt-get update && sudo apt-get install -y jq
-
+      
           if [ ! -s pr.diff ]; then
             echo "✅ PR diff is empty. Nothing to review." > review.txt
             exit 0
           fi
-
+      
+          # --- 1. Create the prompt ---
           cat > prompt.txt << 'EOF'
           You are a senior code reviewer. Review the following code diff.
-
+      
           CRITICAL RULES:
           1. DO NOT summarize what the code does.
           2. ONLY point out SPECIFIC problems in the code changes.
@@ -57,46 +59,83 @@ jobs:
              - HOW to fix it
           4. Focus on: bugs, security flaws, performance issues, bad practices.
           5. If you find no issues, output: "✅ No issues found. The code looks good."
-
+      
           FORMAT (MUST FOLLOW EXACTLY):
           ### FILE: filename.py
           - LINE: [line number if available]
           - CODE: [the exact problematic line]
           - PROBLEM: [what's wrong]
           - FIX: [how to fix]
-
+      
           Code diff to review:
           EOF
-
+      
           cat pr.diff >> prompt.txt
-
-          # Build JSON payload for Ollama Cloud API
-          cat > payload.json << JSONEOF
-          {
-            "model": "gemma4:31b-cloud",
-            "messages": [
-              {"role": "system", "content": "You are a harsh code reviewer. Only output issues in the exact format specified."},
-              {"role": "user", "content": $(jq -Rs . < prompt.txt)}
-            ],
-            "stream": false,
-            "options": {
-              "temperature": 0.1,
-              "num_predict": 4000
-            }
-          }
-          JSONEOF
-
-          # Call Ollama Cloud API
-          curl -s -X POST https://ollama.com/api/chat \
+      
+          # --- 2. Build the JSON payload safely ---
+          # Use jq to create the payload from scratch, which handles escaping automatically.
+          jq -n \
+            --arg model "gemma4:31b-cloud" \
+            --rawfile prompt prompt.txt \
+            '{
+              model: $model,
+              messages: [
+                { role: "system", content: "You are a harsh code reviewer. Only output issues in the exact format specified." },
+                { role: "user", content: $prompt }
+              ],
+              stream: false,
+              options: {
+                temperature: 0.1,
+                num_predict: 4000
+              }
+            }' > payload.json
+      
+          # --- 3. Debug: Show the payload being sent (first 500 chars) ---
+          echo "📤 Sending payload (first 500 chars):"
+          head -c 500 payload.json
+          echo ""
+      
+          # --- 4. Call the Ollama Cloud API ---
+          # The correct base URL is https://ollama.com/api
+          curl -s -w "\n%{http_code}" -X POST https://ollama.com/api/chat \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.OLLAMA_API_KEY }}" \
-            -d @payload.json > response.json
-
-          # Extract the response
+            -d @payload.json > response_with_status.txt
+      
+          # --- 5. Check the response ---
+          HTTP_STATUS=$(tail -n1 response_with_status.txt)
+          # Remove the status line from the response body
+          head -n -1 response_with_status.txt > response.json
+      
+          echo "📥 HTTP Status: $HTTP_STATUS"
+      
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "❌ API request failed with status $HTTP_STATUS"
+            echo "📝 Response body:"
+            cat response.json
+            echo "❌ API request failed" > review.txt
+            rm -f prompt.txt payload.json response.json response_with_status.txt
+            exit 1
+          fi
+      
+          # Check if the response has the expected structure
+          if ! jq -e '.message.content' response.json > /dev/null 2>&1; then
+            echo "❌ Response missing 'message.content'. Full response:"
+            cat response.json
+            echo "❌ No content in response" > review.txt
+            rm -f prompt.txt payload.json response.json response_with_status.txt
+            exit 1
+          fi
+      
+          # --- 6. Extract the review ---
           jq -r '.message.content' response.json > review.txt
-
-          rm -f prompt.txt payload.json response.json
-
+      
+          # Debug: show first 500 characters of the review
+          echo "📝 Review preview (first 500 chars):"
+          head -c 500 review.txt
+          echo ""
+      
+          rm -f prompt.txt payload.json response.json response_with_status.txt
       - name: Post inline review comments
         uses: actions/github-script@v7
         with:
