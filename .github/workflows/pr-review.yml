@@ -89,7 +89,7 @@ jobs:
       
           # --- 2. Build the JSON payload safely ---
           jq -n \
-            --arg model "deepseek-v4-pro:cloud" \  #"gemma4:31b-cloud" \
+            --arg model "deepseek-v4-pro:cloud" \  
             --rawfile prompt prompt.txt \
             '{
               model: $model,
