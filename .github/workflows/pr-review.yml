@@ -35,7 +35,6 @@ jobs:
       - name: Run Ollama Cloud review
         id: review
         run: |
-          sudo apt-get update && sudo apt-get install -y jq
       
           if [ ! -s pr.diff ]; then
             echo "✅ PR diff is empty. Nothing to review." > review.txt
@@ -88,22 +87,20 @@ jobs:
           cat pr.diff >> prompt.txt
       
           # --- 2. Build the JSON payload safely ---
-          jq -n \
-            --arg model "deepseek-v4-pro:cloud" \  
-            --rawfile prompt prompt.txt \
-            '{
-              model: $model,
-              messages: [
-                { role: "system", content: "You are a harsh code reviewer. Only output issues in the exact format specified." },
-                { role: "user", content: $prompt }
-              ],
-              stream: false,
-              options: {
-                temperature: 0.1,
-                num_predict: 4000
-              }
-            }' > payload.json
-      
+          jq -n --arg model "deepseek-v4-pro:cloud" --rawfile prompt prompt.txt '{
+            model: $model,
+            messages: [
+              { role: "system", content: "You are a harsh code reviewer. Only output issues in the exact format specified." },
+              { role: "user", content: $prompt }
+            ],
+            stream: false,
+            options: {
+              temperature: 0.1,
+              num_predict: 4000
+            }
+          }' > payload.json
+ 
+     
           # --- 3. Debug: Show the payload size ---
           PAYLOAD_SIZE=$(wc -c < payload.json)
           echo "📤 Payload size: $PAYLOAD_SIZE bytes"
