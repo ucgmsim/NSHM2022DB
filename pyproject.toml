@@ -15,8 +15,9 @@ dependencies = [
     "numpy>=2.4.6",
     "pandas>=3.0.3",
     "pygmt-helper>=2026.2.1",
+    "pyproj>=3.7.2",
     "qcore-utils>=2025.12.2",
-    "rich>=15.0.0",
+    "requests>=2.34.2",
     "shapely>=2.1.2",
     "source-modelling>=2026.6.2",
     "typer>=0.26.7",
@@ -88,3 +89,8 @@ known-first-party = [
 "tests/**.py" = ["D"]
 
 
+[tool.coverage.run]
+omit = [
+     "nshmdb/api.py",
+     "nshmdb/scripts/nshm_db_generator.py"
+]
