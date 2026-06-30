@@ -265,7 +265,8 @@ def to_sql(
             case {InfixOperator.OR: (lhs, rhs)}:
                 return f"({expression_to_sql(lhs)}) OR ({expression_to_sql(rhs)})"
             case {UnaryOperator.NOT: expr} if isinstance(expr, str) or isinstance(
-                expr, ExpressionTree
+                expr,
+                (str, dict[Operator, str | tuple["ExpressionTree", "ExpressionTree"]]),
             ):
                 return f"(NOT {expression_to_sql(expr)})"
             case expression if isinstance(expression, str):
@@ -282,7 +283,8 @@ def to_sql(
                 yield from query_parameters(lhs)
                 yield from query_parameters(rhs)
             case {UnaryOperator.NOT: expr} if isinstance(expr, str) or isinstance(
-                expr, ExpressionTree
+                expr,
+                (str, dict[Operator, str | tuple["ExpressionTree", "ExpressionTree"]]),
             ):
                 yield from query_parameters(expr)
             case fault_name if isinstance(fault_name, str):
@@ -314,7 +316,7 @@ def to_sql(
         parameters.append(fault_count_limit)
 
     sql_expression = f"""SELECT
-     rupture.rupture_id, ANY_VALUE(rupture.magnitude), ANY_VALUE(rupture.area), ANY_VALUE(rupture.len), ANY_VALUE(rupture.rate)
+     rupture.rupture_id, ANY_VALUE(rupture.nshm_id), ANY_VALUE(rupture.fault_system), ANY_VALUE(rupture.magnitude), ANY_VALUE(rupture.area), ANY_VALUE(rupture.len), ANY_VALUE(rupture.rate)
     FROM rupture
     JOIN
         rupture_faults ON rupture.rupture_id = rupture_faults.rupture_id

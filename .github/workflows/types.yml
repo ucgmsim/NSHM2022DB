@@ -1,0 +1,29 @@
+name: Type Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install GMT
+        run: sudo apt-get update && sudo apt-get install -y gmt libgmt-dev ghostscript gdal-bin libgdal-dev
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Run type checking with ty
+        run: uv run --all-groups ty check
