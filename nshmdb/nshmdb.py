@@ -81,7 +81,6 @@ class FaultInfo:
     tect_type: Optional[int]
     """The tectonic type of the fault."""
 
-
 class NSHMDB:
     """Class for interacting with the NSHMDB database.
 
@@ -249,13 +248,57 @@ class NSHMDB:
             (rupture_id, fault_id),
         )
 
+    def get_fault_planes(self, fault_id: int) -> list[Plane]:
+        """Get the fault planes for a specific fault from the database.
+
+        Parameters
+        ----------
+        fault_id : int
+            The id of the fault to retrieve planes for.
+
+        Returns
+        -------
+        list[Plane]
+            The fault planes.
+        """
+        with self.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * from fault_plane where fault_id = ?", (fault_id,)
+            )
+            planes = []
+            for (
+                _,
+                top_left_lat,
+                top_left_lon,
+                top_right_lat,
+                top_right_lon,
+                bottom_right_lat,
+                bottom_right_lon,
+                bottom_left_lat,
+                bottom_left_lon,
+                top,
+                bottom,
+                _,
+            ) in cursor.fetchall():
+                corners = np.array(
+                    [
+                        [top_left_lat, top_left_lon, top],
+                        [top_right_lat, top_right_lon, top],
+                        [bottom_right_lat, bottom_right_lon, bottom],
+                        [bottom_left_lat, bottom_left_lon, bottom],
+                    ]
+                )
+                planes.append(Plane(coordinates.wgs_depth_to_nztm(corners)))
+            return planes
+
     def get_fault(self, fault_id: int) -> Fault:
         """Get a specific fault definition from a database.
 
         Parameters
         ----------
         fault_id : int
-            The id of the fault to retreive.
+            The id of the fault to retrieve.
 
         Returns
         -------
