@@ -34,6 +34,7 @@ import numpy as np
 
 from nshmdb import query
 from qcore import coordinates
+from source_modelling.moment import BoldM
 from source_modelling.sources import Fault, Plane
 
 
@@ -153,7 +154,7 @@ class NSHMDB:
         )
 
     def most_likely_fault(
-        self, rupture_id: int, parent_fault_magnitudes: dict[str, float]
+        self, rupture_id: int, parent_fault_magnitudes: dict[str, BoldM]
     ) -> dict[str, float]:
         """
         Calculate the cumulative activity rate for each fault involved in a specified rupture.
@@ -174,9 +175,10 @@ class NSHMDB:
         ----------
         rupture_id : int
             The unique identifier of the rupture to query.
-        parent_fault_magnitudes : dict[str, float]
-            A mapping of parent fault names to their expected magnitudes. These magnitudes
-            define the target values for querying activity rates in the MFD table.
+        parent_fault_magnitudes : dict[str, BoldM]
+            A mapping of parent fault names to their expected magnitudes (in the
+            `BoldM` convention). These magnitudes define the target values for
+            querying activity rates in the MFD table.
 
         Returns
         -------

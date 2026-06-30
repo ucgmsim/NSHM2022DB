@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from nshmdb.nshmdb import NSHMDB, FaultInfo, Rupture
+from source_modelling.moment import BoldM
 
 
 @pytest.fixture
@@ -140,7 +141,7 @@ def test_query(alpine_fault_nshmdb: NSHMDB):
 
 
 def test_rates(alpine_fault_nshmdb: NSHMDB):
-    assert alpine_fault_nshmdb.most_likely_fault(1, {"Alpine Fault": 6.5}) == {
+    assert alpine_fault_nshmdb.most_likely_fault(1, {"Alpine Fault": BoldM(6.5)}) == {
         "Alpine Fault": 0.01
     }
 
