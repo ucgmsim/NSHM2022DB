@@ -98,3 +98,10 @@ def test_to_sql_invalid_query():
         ValueError, match="Invalid search expression fault1 & invalid & fault!"
     ):
         to_sql("fault1 & invalid & fault!")
+
+
+def test_to_sql_lower_rate_bound():
+    query_str = "fault1"
+    sql_query, parameters = to_sql(query_str, rate_bounds=(0.1, None))
+    assert "rupture.rate >= ?" in sql_query
+    assert 0.1 in parameters
