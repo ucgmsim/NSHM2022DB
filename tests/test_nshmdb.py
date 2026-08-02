@@ -2,9 +2,12 @@ from collections.abc import Generator
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from nshmdb.nshmdb import NSHMDB, FaultInfo, FaultSystem, Rupture
+from qcore import coordinates
+from source_modelling.sources import Fault, Plane
 
 
 @pytest.fixture
@@ -146,3 +149,152 @@ def test_get_fault_info(test_db: NSHMDB):
         rake=90.0,
         tect_type=None,
     )
+
+
+def test_connection_not_connected(tmp_path: Path):
+    """Test that connection() raises ConnectionError before entering context."""
+    db = NSHMDB(tmp_path / "test.db")
+    with pytest.raises(ConnectionError):
+        db.connection()
+
+
+def test_create_standalone(tmp_path: Path):
+    """Test that create() works standalone (not inside a context manager)."""
+    db_path = tmp_path / "standalone.db"
+    db = NSHMDB(db_path)
+    db.create()
+    assert db_path.exists()
+
+
+def test_get_fault_ids(alpine_fault_nshmdb: NSHMDB):
+    """Test retrieving all NSHM fault IDs."""
+    fault_ids = alpine_fault_nshmdb.get_fault_ids()
+    assert fault_ids == {1}
+
+
+def test_get_fault_info_not_found(test_db: NSHMDB):
+    """Test that get_fault_info raises ValueError for a nonexistent fault."""
+    with pytest.raises(ValueError, match="Could not find fault"):
+        test_db.get_fault_info(FaultSystem.Crustal, 999)
+
+
+def test_insert_many_faults_without_planes(test_db: NSHMDB):
+    """Test bulk-inserting faults that have no plane geometry."""
+    faults = [
+        FaultInfo(
+            fault_system=FaultSystem.Crustal,
+            fault_nshm_id=1,
+            name="Fault A",
+            rake=90.0,
+            tect_type=None,
+            fault=None,
+        ),
+        FaultInfo(
+            fault_system=FaultSystem.Crustal,
+            fault_nshm_id=2,
+            name="Fault B",
+            rake=45.0,
+            tect_type=1,
+            fault=None,
+        ),
+    ]
+    test_db.insert_many_faults(faults)
+    assert test_db.get_fault_names() == {"Fault A", "Fault B"}
+
+
+def test_insert_many_faults_with_planes(test_db: NSHMDB):
+    """Test bulk-inserting faults that include plane geometry."""
+    corners = np.array(
+        [
+            [-42.0, 172.0, 0.0],
+            [-42.0, 173.0, 0.0],
+            [-43.0, 173.0, 10.0],
+            [-43.0, 172.0, 10.0],
+        ]
+    )
+    plane = Plane(coordinates.wgs_depth_to_nztm(corners))
+    fault_geom = Fault([plane])
+
+    faults = [
+        FaultInfo(
+            fault_system=FaultSystem.Crustal,
+            fault_nshm_id=1,
+            name="Alpine Fault",
+            rake=90.0,
+            tect_type=None,
+            fault=fault_geom,
+        ),
+    ]
+    test_db.insert_many_faults(faults)
+    assert test_db.get_fault_names() == {"Alpine Fault"}
+    assert test_db.get_fault_ids() == {1}
+
+
+def test_insert_many_ruptures(test_db: NSHMDB):
+    """Test bulk-inserting ruptures and their fault associations."""
+    faults = [
+        FaultInfo(
+            fault_system=FaultSystem.Crustal,
+            fault_nshm_id=1,
+            name="Fault A",
+            rake=90.0,
+            tect_type=None,
+            fault=None,
+        ),
+    ]
+    test_db.insert_many_faults(faults)
+
+    ruptures = pd.DataFrame(
+        {
+            "magnitude": [6.5],
+            "area": [100.0],
+            "len": [10.0],
+            "rate": [0.01],
+            "fault_system": [int(FaultSystem.Crustal)],
+        },
+        index=pd.Index([1], name="nshm_id"),
+    )
+    rupture_faults = pd.DataFrame(
+        {
+            "rupture_id": [1],
+            "fault_id": [1],
+            "fault_system": [int(FaultSystem.Crustal)],
+        }
+    )
+    test_db.insert_many_ruptures(ruptures, rupture_faults)
+
+    rupture = test_db.get_rupture(FaultSystem.Crustal, 1)
+    assert rupture.magnitude == 6.5
+    assert rupture.rate == 0.01
+
+
+def test_insert_magnitude_frequency_distribution(test_db: NSHMDB):
+    """Test bulk-inserting magnitude frequency distribution entries."""
+    faults = [
+        FaultInfo(
+            fault_system=FaultSystem.Crustal,
+            fault_nshm_id=1,
+            name="Fault A",
+            rake=90.0,
+            tect_type=None,
+            fault=None,
+        ),
+    ]
+    test_db.insert_many_faults(faults)
+
+    mfds = pd.DataFrame(
+        {
+            "nshm_id": [1],
+            "fault_system": [int(FaultSystem.Crustal)],
+            "magnitude": [6.5],
+            "rate": [0.01],
+        }
+    )
+    test_db.insert_magnitude_frequency_distribution(mfds)
+
+    conn = test_db.connection()
+    result = conn.execute(
+        "SELECT magnitude, rate FROM magnitude_frequency_distribution"
+    ).fetchall()
+    assert len(result) == 1
+    assert result[0] == (6.5, 0.01)
