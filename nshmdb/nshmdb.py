@@ -18,7 +18,7 @@ from enum import IntEnum, auto
 from pathlib import Path
 from sqlite3 import Connection
 from types import TracebackType
-from typing import Optional, Self
+from typing import Self
 
 import duckdb
 import numpy as np
@@ -52,7 +52,7 @@ class Rupture:
     """The rupture area (in km^2)."""
     length: float
     """The rupture length (in km)."""
-    rate: Optional[float]
+    rate: float | None
     """An optional yearly rate of rupture."""
     faults: dict[str, Fault] = field(repr=False)
     """The faults in the rupture."""
@@ -526,7 +526,7 @@ class NSHMDB(contextlib.AbstractContextManager):
             (rupture_nshm_id,),
         )
         fault_planes = cursor.fetchall()
-        faults = collections.defaultdict(lambda: [])
+        faults = collections.defaultdict(list)
         for (
             _,
             top_left_lat,
@@ -620,13 +620,35 @@ class NSHMDB(contextlib.AbstractContextManager):
             for (fault_id,) in conn.execute("SELECT nshm_id FROM fault").fetchall()
         }
 
+    def get_rupture_ids(self, fault_system: FaultSystem) -> set[int]:
+        """Get the list of rupture ids for a given fault system.
+
+        Parameters
+        ----------
+        fault_system : FaultSystem
+            The fault system to retrieve rupture ids for.
+
+        Returns
+        -------
+        set[int]
+            The NSHM ids of every rupture belonging to the fault system.
+        """
+        conn = self.connection()
+        return {
+            rupture_nshm_id
+            for (rupture_nshm_id,) in conn.execute(
+                "SELECT nshm_id FROM rupture WHERE fault_system = ?",
+                (fault_system,),
+            ).fetchall()
+        }
+
     def query(
         self,
         query_str: str,
-        magnitude_bounds: tuple[Optional[float], Optional[float]] = (None, None),
-        rate_bounds: tuple[Optional[float], Optional[float]] = (None, None),
+        magnitude_bounds: tuple[float | None, float | None] = (None, None),
+        rate_bounds: tuple[float | None, float | None] = (None, None),
         limit: int = 100,
-        fault_count_limit: Optional[int] = None,
+        fault_count_limit: int | None = None,
     ) -> dict[int, Rupture]:
         """Make an advanced query for ruptures in the database using the query engine in `nshmdb.query`.
 
