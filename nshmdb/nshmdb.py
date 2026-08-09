@@ -620,13 +620,15 @@ class NSHMDB(contextlib.AbstractContextManager):
             for (fault_id,) in conn.execute("SELECT nshm_id FROM fault").fetchall()
         }
 
-    def get_rupture_ids(self, fault_system: FaultSystem) -> set[int]:
+    def get_rupture_ids(self, fault_system: FaultSystem, exclude_zero_rate: bool = False) -> set[int]:
         """Get the list of rupture ids for a given fault system.
 
         Parameters
         ----------
         fault_system : FaultSystem
             The fault system to retrieve rupture ids for.
+        exclude_zero_rate : bool
+            If True, only return ruptures with a non-zero rate.
 
         Returns
         -------
@@ -637,7 +639,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         return {
             rupture_nshm_id
             for (rupture_nshm_id,) in conn.execute(
-                "SELECT nshm_id FROM rupture WHERE fault_system = ?",
+                "SELECT nshm_id FROM rupture WHERE fault_system = ? AND rate > 0" if exclude_zero_rate else "SELECT nshm_id FROM rupture WHERE fault_system = ?",
                 (fault_system,),
             ).fetchall()
         }
