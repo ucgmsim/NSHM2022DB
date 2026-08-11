@@ -131,7 +131,13 @@ class NSHMDB(contextlib.AbstractContextManager):
         self._conn = None
 
     def __enter__(self) -> Self:
-        """Open the database connection."""
+        """Open the database connection.
+
+        Returns
+        -------
+        Self
+            This database instance, with an open connection.
+        """
         self.connect()
         return self
 
@@ -141,7 +147,17 @@ class NSHMDB(contextlib.AbstractContextManager):
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Close the database connection."""
+        """Close the database connection.
+
+        Parameters
+        ----------
+        exc_type : type[BaseException] | None
+            The type of the exception raised in the context, if any.
+        exc_value : BaseException | None
+            The exception instance raised in the context, if any.
+        traceback : TracebackType | None
+            The traceback of the exception raised in the context, if any.
+        """
         _ = exc_value, traceback
         if exc_type is None and self._conn is not None:
             self._conn.commit()
@@ -154,6 +170,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         Returns
         -------
         Connection
+            The open SQLite database connection.
         """
         if self._conn is None:
             raise ConnectionError(
@@ -311,6 +328,18 @@ class NSHMDB(contextlib.AbstractContextManager):
         self.connection().commit()
 
     def _nshm_id_to_fault_id(self, nshm_ids: pd.DataFrame) -> pd.DataFrame:
+        """Attach database fault ids to a frame keyed by fault system and NSHM id.
+
+        Parameters
+        ----------
+        nshm_ids : pd.DataFrame
+            Frame containing ``fault_system`` and ``fault_nshm_id`` columns.
+
+        Returns
+        -------
+        pd.DataFrame
+            The input frame with a ``fault_id`` column merged in.
+        """
         conn = self.connection()
         fault_id_map = pd.read_sql_query(
             "SELECT fault_system, nshm_id, fault_id FROM fault",
@@ -322,6 +351,18 @@ class NSHMDB(contextlib.AbstractContextManager):
         )
 
     def _nshm_id_to_rupture_id(self, nshm_ids: pd.DataFrame) -> pd.DataFrame:
+        """Attach database rupture ids to a frame keyed by fault system and NSHM id.
+
+        Parameters
+        ----------
+        nshm_ids : pd.DataFrame
+            Frame containing ``fault_system`` and ``rupture_nshm_id`` columns.
+
+        Returns
+        -------
+        pd.DataFrame
+            The input frame with a ``rupture_id`` column merged in.
+        """
         conn = self.connection()
         rupture_id_map = pd.read_sql_query(
             "SELECT fault_system, nshm_id, rupture_id FROM rupture",

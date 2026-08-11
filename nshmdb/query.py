@@ -54,7 +54,13 @@ class Token(NamedTuple):
 
 
 class TokenStream:
-    """A token iterator with support for peeking the next token."""
+    """A token iterator with support for peeking the next token.
+
+    Parameters
+    ----------
+    tokens : list[Token]
+        The list of tokens.
+    """
 
     def __init__(self, tokens: list[Token]):
         """Initialise a token stream from a list of tokens.
@@ -175,6 +181,21 @@ def parse(expression: str) -> ExpressionTree:
     tokens = lex(expression)
 
     def expr_binding_power(token_iterator: TokenStream, min_binding_power: int):
+        """Parse an expression from the token stream using binding-power precedence climbing.
+
+        Parameters
+        ----------
+        token_iterator : TokenStream
+            The stream of tokens to parse from.
+        min_binding_power : int
+            The minimum binding power an infix operator must have to be
+            consumed at this recursion level.
+
+        Returns
+        -------
+        ExpressionTree
+            The parsed expression tree.
+        """
         token = next(token_iterator)
 
         match token:
@@ -259,6 +280,18 @@ def to_sql(
     expression = parse(query)
 
     def expression_to_sql(expression: ExpressionTree) -> str:
+        """Render an expression tree as the equivalent SQL boolean expression.
+
+        Parameters
+        ----------
+        expression : ExpressionTree
+            The expression tree to render.
+
+        Returns
+        -------
+        str
+            The equivalent SQL boolean expression.
+        """
         match expression:
             case {InfixOperator.AND: (lhs, rhs)}:
                 return f"({expression_to_sql(lhs)}) AND ({expression_to_sql(rhs)})"
@@ -275,6 +308,18 @@ def to_sql(
                 raise ValueError("Invalid expression")
 
     def query_parameters(expression: ExpressionTree) -> Generator[str]:
+        """Yield the fault names referenced by an expression tree, in SQL parameter order.
+
+        Parameters
+        ----------
+        expression : ExpressionTree
+            The expression tree to extract fault names from.
+
+        Yields
+        ------
+        str
+            The next fault name referenced by the expression, in order.
+        """
         match expression:
             case {InfixOperator.AND: (lhs, rhs)}:
                 yield from query_parameters(lhs)
