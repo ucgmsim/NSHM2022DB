@@ -484,7 +484,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         """
         conn = self.connection()
         cursor = conn.cursor()
-        (rupture_id, magnitude, area, length, rate) = cursor.execute(
+        rupture_id, magnitude, area, length, rate = cursor.execute(
             "SELECT rupture_id, magnitude, area, len, rate FROM rupture WHERE nshm_id = ? AND fault_system = ?",
             (rupture_nshm_id, fault_system),
         ).fetchone()
@@ -620,7 +620,9 @@ class NSHMDB(contextlib.AbstractContextManager):
             for (fault_id,) in conn.execute("SELECT nshm_id FROM fault").fetchall()
         }
 
-    def get_rupture_ids(self, fault_system: FaultSystem, exclude_zero_rate: bool = False) -> set[int]:
+    def get_rupture_ids(
+        self, fault_system: FaultSystem, exclude_zero_rate: bool = False
+    ) -> set[int]:
         """Get the list of rupture ids for a given fault system.
 
         Parameters
@@ -639,7 +641,11 @@ class NSHMDB(contextlib.AbstractContextManager):
         return {
             rupture_nshm_id
             for (rupture_nshm_id,) in conn.execute(
-                "SELECT nshm_id FROM rupture WHERE fault_system = ? AND rate > 0" if exclude_zero_rate else "SELECT nshm_id FROM rupture WHERE fault_system = ?",
+                (
+                    "SELECT nshm_id FROM rupture WHERE fault_system = ? AND rate > 0"
+                    if exclude_zero_rate
+                    else "SELECT nshm_id FROM rupture WHERE fault_system = ?"
+                ),
                 (fault_system,),
             ).fetchall()
         }
