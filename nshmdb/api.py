@@ -431,25 +431,19 @@ def _extract_rupture_join_table(
 
 @dataclass
 class NSHMSolution:
-    """
-    Data payload representing a composite or partial NSHM logic tree solution.
-
-    Parameters
-    ----------
-    magnitude_frequency_distribution : pd.DataFrame | None
-        The computed magnitude frequency bounds.
-    rupture_join_table : pd.DataFrame
-        Mapping defining relationships between rupture IDs and fault IDs.
-    rupture_properties : pd.DataFrame
-        Aggregated physical properties and rate values for specific ruptures.
-    faults : list[FaultInfo]
-        Collection of generated spatial fault definition payloads.
-    """
+    """Data payload representing a composite or partial NSHM logic tree solution."""
 
     magnitude_frequency_distribution: pd.DataFrame | None
+    """The computed magnitude frequency bounds."""
+
     rupture_join_table: pd.DataFrame
+    """Mapping defining relationships between rupture IDs and fault IDs."""
+
     rupture_properties: pd.DataFrame
+    """Aggregated physical properties and rate values for specific ruptures."""
+
     faults: list[FaultInfo]
+    """Collection of generated spatial fault definition payloads."""
 
 
 def _merge_branches(solutions: Iterator[tuple[float, ZipFile]]) -> NSHMSolution:

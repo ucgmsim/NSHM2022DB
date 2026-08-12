@@ -18,7 +18,7 @@ from enum import IntEnum, auto
 from pathlib import Path
 from sqlite3 import Connection
 from types import TracebackType
-from typing import Optional, Self
+from typing import Self
 
 import duckdb
 import numpy as np
@@ -52,7 +52,7 @@ class Rupture:
     """The rupture area (in km^2)."""
     length: float
     """The rupture length (in km)."""
-    rate: Optional[float]
+    rate: float | None
     """An optional yearly rate of rupture."""
     faults: dict[str, Fault] = field(repr=False)
     """The faults in the rupture."""
@@ -131,7 +131,13 @@ class NSHMDB(contextlib.AbstractContextManager):
         self._conn = None
 
     def __enter__(self) -> Self:
-        """Open the database connection."""
+        """Open the database connection.
+
+        Returns
+        -------
+        Self
+            This database instance, with an open connection.
+        """
         self.connect()
         return self
 
@@ -141,7 +147,17 @@ class NSHMDB(contextlib.AbstractContextManager):
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Close the database connection."""
+        """Close the database connection.
+
+        Parameters
+        ----------
+        exc_type : type[BaseException] | None
+            The type of the exception raised in the context, if any.
+        exc_value : BaseException | None
+            The exception instance raised in the context, if any.
+        traceback : TracebackType | None
+            The traceback of the exception raised in the context, if any.
+        """
         _ = exc_value, traceback
         if exc_type is None and self._conn is not None:
             self._conn.commit()
@@ -154,6 +170,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         Returns
         -------
         Connection
+            The open SQLite database connection.
         """
         if self._conn is None:
             raise ConnectionError(
@@ -311,6 +328,18 @@ class NSHMDB(contextlib.AbstractContextManager):
         self.connection().commit()
 
     def _nshm_id_to_fault_id(self, nshm_ids: pd.DataFrame) -> pd.DataFrame:
+        """Attach database fault ids to a frame keyed by fault system and NSHM id.
+
+        Parameters
+        ----------
+        nshm_ids : pd.DataFrame
+            Frame containing ``fault_system`` and ``fault_nshm_id`` columns.
+
+        Returns
+        -------
+        pd.DataFrame
+            The input frame with a ``fault_id`` column merged in.
+        """
         conn = self.connection()
         fault_id_map = pd.read_sql_query(
             "SELECT fault_system, nshm_id, fault_id FROM fault",
@@ -322,6 +351,18 @@ class NSHMDB(contextlib.AbstractContextManager):
         )
 
     def _nshm_id_to_rupture_id(self, nshm_ids: pd.DataFrame) -> pd.DataFrame:
+        """Attach database rupture ids to a frame keyed by fault system and NSHM id.
+
+        Parameters
+        ----------
+        nshm_ids : pd.DataFrame
+            Frame containing ``fault_system`` and ``rupture_nshm_id`` columns.
+
+        Returns
+        -------
+        pd.DataFrame
+            The input frame with a ``rupture_id`` column merged in.
+        """
         conn = self.connection()
         rupture_id_map = pd.read_sql_query(
             "SELECT fault_system, nshm_id, rupture_id FROM rupture",
@@ -484,7 +525,7 @@ class NSHMDB(contextlib.AbstractContextManager):
         """
         conn = self.connection()
         cursor = conn.cursor()
-        (rupture_id, magnitude, area, length, rate) = cursor.execute(
+        rupture_id, magnitude, area, length, rate = cursor.execute(
             "SELECT rupture_id, magnitude, area, len, rate FROM rupture WHERE nshm_id = ? AND fault_system = ?",
             (rupture_nshm_id, fault_system),
         ).fetchone()
@@ -526,7 +567,7 @@ class NSHMDB(contextlib.AbstractContextManager):
             (rupture_nshm_id,),
         )
         fault_planes = cursor.fetchall()
-        faults = collections.defaultdict(lambda: [])
+        faults = collections.defaultdict(list)
         for (
             _,
             top_left_lat,
@@ -620,13 +661,43 @@ class NSHMDB(contextlib.AbstractContextManager):
             for (fault_id,) in conn.execute("SELECT nshm_id FROM fault").fetchall()
         }
 
+    def get_rupture_ids(
+        self, fault_system: FaultSystem, exclude_zero_rate: bool = False
+    ) -> set[int]:
+        """Get the list of rupture ids for a given fault system.
+
+        Parameters
+        ----------
+        fault_system : FaultSystem
+            The fault system to retrieve rupture ids for.
+        exclude_zero_rate : bool
+            If True, only return ruptures with a non-zero rate.
+
+        Returns
+        -------
+        set[int]
+            The NSHM ids of every rupture belonging to the fault system.
+        """
+        conn = self.connection()
+        return {
+            rupture_nshm_id
+            for (rupture_nshm_id,) in conn.execute(
+                (
+                    "SELECT nshm_id FROM rupture WHERE fault_system = ? AND rate > 0"
+                    if exclude_zero_rate
+                    else "SELECT nshm_id FROM rupture WHERE fault_system = ?"
+                ),
+                (fault_system,),
+            ).fetchall()
+        }
+
     def query(
         self,
         query_str: str,
-        magnitude_bounds: tuple[Optional[float], Optional[float]] = (None, None),
-        rate_bounds: tuple[Optional[float], Optional[float]] = (None, None),
+        magnitude_bounds: tuple[float | None, float | None] = (None, None),
+        rate_bounds: tuple[float | None, float | None] = (None, None),
         limit: int = 100,
-        fault_count_limit: Optional[int] = None,
+        fault_count_limit: int | None = None,
     ) -> dict[int, Rupture]:
         """Make an advanced query for ruptures in the database using the query engine in `nshmdb.query`.
 
