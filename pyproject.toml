@@ -10,17 +10,17 @@ readme = "README.md"
 requires-python = ">=3.11"
 dynamic = ["version"]
 dependencies = [
-    "duckdb>=1.5.3",
-    "geojson>=3.3.0",
-    "numpy>=2.4.6",
-    "pandas>=3.0.3",
-    "pygmt-helper>=2026.2.1",
-    "pyproj>=3.7.2",
+    "duckdb>=1.1.0",
+    "geojson>=3.0.0",
+    "numpy>=1.26.0",
+    "pandas>=2.1.1",
+    "pygmt-helper>=2025.12.1",
+    "pyproj>=3.6.1",
     "qcore-utils>=2025.12.2",
-    "requests>=2.34.2",
-    "shapely>=2.1.2",
-    "source-modelling>=2026.6.2",
-    "typer>=0.26.7",
+    "requests>=2.32.0",
+    "shapely>=2.0.2",
+    "source-modelling>=2025.12.1",
+    "typer>=0.15.4",
 ]
 
 [dependency-groups]
