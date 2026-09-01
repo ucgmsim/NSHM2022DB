@@ -525,8 +525,8 @@ class NSHMDB(contextlib.AbstractContextManager):
         """
         conn = self.connection()
         cursor = conn.cursor()
-        rupture_id, magnitude, area, length, rate = cursor.execute(
-            "SELECT rupture_id, magnitude, area, len, rate FROM rupture WHERE nshm_id = ? AND fault_system = ?",
+        magnitude, area, length, rate = cursor.execute(
+            "SELECT magnitude, area, len, rate FROM rupture WHERE nshm_id = ? AND fault_system = ?",
             (rupture_nshm_id, fault_system),
         ).fetchone()
 
@@ -537,16 +537,20 @@ class NSHMDB(contextlib.AbstractContextManager):
             area=area,
             length=length,
             rate=rate,
-            faults=self.get_rupture_faults(rupture_id),
+            faults=self.get_rupture_faults(fault_system, rupture_nshm_id),
         )
 
-    def get_rupture_faults(self, rupture_nshm_id: int) -> dict[str, Fault]:
+    def get_rupture_faults(
+        self, fault_system: FaultSystem, rupture_nshm_id: int
+    ) -> dict[str, Fault]:
         """Retrieve faults involved in a rupture from the database.
 
         Parameters
         ----------
+        fault_system : FaultSystem
+            The fault system of the rupture.
         rupture_nshm_id : int
-            The internal rupture id.
+            The NSHM id of the rupture.
 
         Returns
         -------
@@ -560,11 +564,12 @@ class NSHMDB(contextlib.AbstractContextManager):
             """SELECT fs.*, f.fault_id, f.fault_system, p.parent_id, p.name
             FROM fault_plane fs
             JOIN rupture_faults rf ON fs.fault_id = rf.fault_id
+            JOIN rupture r ON rf.rupture_id = r.rupture_id
             JOIN fault f ON fs.fault_id = f.fault_id
             JOIN parent_fault p ON f.parent_id = p.parent_id
-            WHERE rf.rupture_id = ?
+            WHERE r.nshm_id = ? AND r.fault_system = ?
             ORDER BY f.parent_id""",
-            (rupture_nshm_id,),
+            (rupture_nshm_id, fault_system),
         )
         fault_planes = cursor.fetchall()
         faults = collections.defaultdict(list)
@@ -605,11 +610,15 @@ class NSHMDB(contextlib.AbstractContextManager):
             faults[fault_name].append(Plane(coordinates.wgs_depth_to_nztm(corners)))
         return {name: Fault(planes) for name, planes in faults.items()}
 
-    def get_rupture_fault_info(self, rupture_nshm_id: int) -> dict[str, FaultInfo]:
+    def get_rupture_fault_info(
+        self, fault_system: FaultSystem, rupture_nshm_id: int
+    ) -> dict[str, FaultInfo]:
         """Get the rupture fault information for a given rupture.
 
         Parameters
         ----------
+        fault_system : FaultSystem
+            The fault system of the rupture.
         rupture_nshm_id : int
             The NSHM rupture id.
 
@@ -627,9 +636,9 @@ class NSHMDB(contextlib.AbstractContextManager):
             JOIN rupture_faults rf on f.fault_id = rf.fault_id
             JOIN rupture r ON r.rupture_id = rf.rupture_id
             JOIN parent_fault p ON f.parent_id = p.parent_id
-            WHERE r.nshm_id = ?
+            WHERE r.nshm_id = ? AND r.fault_system = ?
             """,
-            (rupture_nshm_id,),
+            (rupture_nshm_id, fault_system),
         )
         fault_rows = cursor.fetchall()
         return {row[0]: FaultInfo(*row[1:], fault=None) for row in fault_rows}
@@ -740,10 +749,10 @@ class NSHMDB(contextlib.AbstractContextManager):
                     area=area,
                     length=length,
                     rate=rate,
-                    faults=self.get_rupture_faults(internal_id),
+                    faults=self.get_rupture_faults(fault_system, nshm_id),
                 )
                 for (
-                    internal_id,
+                    _internal_id,
                     nshm_id,
                     fault_system,
                     magnitude,
