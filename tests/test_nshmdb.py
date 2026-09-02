@@ -85,7 +85,7 @@ def test_get_fault(test_db: NSHMDB):
 
 def test_get_rupture_faults(alpine_fault_nshmdb: NSHMDB):
     """Test retrieving faults associated with a rupture."""
-    faults = alpine_fault_nshmdb.get_rupture_faults(1)
+    faults = alpine_fault_nshmdb.get_rupture_faults(FaultSystem.Crustal, 1)
     assert set(faults) == {"Alpine Fault"}
     fault = faults["Alpine Fault"]
     assert len(fault.planes) == 1
@@ -105,7 +105,7 @@ def test_get_rupture_faults(alpine_fault_nshmdb: NSHMDB):
 def test_get_rupture_fault_info(alpine_fault_nshmdb: NSHMDB):
     """Test retrieving faults associated with a rupture."""
 
-    faults = alpine_fault_nshmdb.get_rupture_fault_info(1)
+    faults = alpine_fault_nshmdb.get_rupture_fault_info(FaultSystem.Crustal, 1)
     assert faults == {
         "Alpine Fault": FaultInfo(
             fault_system=FaultSystem.Crustal,
