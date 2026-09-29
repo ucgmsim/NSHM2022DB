@@ -76,6 +76,7 @@ class FaultInfo:
     """The tectonic type of the fault."""
 
     fault: Fault | None = None
+    """The fault geometry, if loaded."""
 
 
 class NSHMDB(contextlib.AbstractContextManager):
