@@ -2,6 +2,7 @@
 
 import copy
 import io
+import json
 import warnings
 import zipfile
 from collections import defaultdict
@@ -9,16 +10,14 @@ from collections.abc import Generator, Iterator
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePath
-from typing import TextIO
+from typing import Any, TextIO
 from zipfile import ZipFile
 
-import geojson
 import numpy as np
 import pandas as pd
 import pyproj
 import requests
 import shapely
-from geojson.feature import FeatureCollection
 
 from nshmdb.nshmdb import FaultInfo, FaultSystem
 from qcore import coordinates
@@ -36,6 +35,12 @@ MFDS_PATH = PurePath("ruptures") / "sub_seismo_on_fault_mfds.csv"
 
 HIKURANGI_NAME = "Hikurangi, Kermadec to Louisville ridge, 30km - with slip deficit smoothed near East Cape and locked near trench."
 PUYSEGUR_NAME = "Puysegur, 15km, 50% coupling, corrected dip direction"
+
+FeatureCollection = dict[str, Any]
+"""A GeoJSON FeatureCollection, as parsed by `json.load`."""
+
+GEOJSON_COORDINATE_PRECISION = 6
+"""Decimal places coordinates are rounded to when reading GeoJSON."""
 
 
 def _get_grouped_source_ids(
@@ -190,7 +195,7 @@ def infer_fault_system(feature_collection: FeatureCollection) -> FaultSystem:
     FaultSystem
         The enumerated fault system associated with the collection.
     """
-    name = feature_collection.features[0].properties["ParentName"]
+    name = feature_collection["features"][0]["properties"]["ParentName"]
     if name == HIKURANGI_NAME:
         return FaultSystem.Hikurangi
     elif name == PUYSEGUR_NAME:
@@ -220,6 +225,50 @@ def _infer_dip_direction(start: np.ndarray, end: np.ndarray) -> float:
     return (strike_direction + 90) % 360
 
 
+def _geometry_coords(geometry: dict[str, Any]) -> Generator[tuple[float, ...]]:
+    """
+    Yields every coordinate tuple of a GeoJSON geometry.
+
+    Coordinates are rounded to `GEOJSON_COORDINATE_PRECISION` decimal
+    places, matching what the `geojson` package did when loading a file.
+
+    Parameters
+    ----------
+    geometry : dict[str, Any]
+        The GeoJSON geometry object (any type, including GeometryCollection).
+
+    Yields
+    ------
+    tuple[float, ...]
+        The next coordinate tuple, in file order.
+    """
+    if "geometries" in geometry:
+        for sub_geometry in geometry["geometries"]:
+            yield from _geometry_coords(sub_geometry)
+        return
+
+    def walk(coordinates: list) -> Generator[tuple[float, ...]]:
+        """Yield the leaf positions of a nested GeoJSON coordinate array.
+
+        Parameters
+        ----------
+        coordinates : list
+            A position or a (nested) array of positions.
+
+        Yields
+        ------
+        tuple[float, ...]
+            The next rounded position.
+        """
+        if coordinates and isinstance(coordinates[0], (int, float)):
+            yield tuple(round(x, GEOJSON_COORDINATE_PRECISION) for x in coordinates)
+            return
+        for element in coordinates:
+            yield from walk(element)
+
+    yield from walk(geometry["coordinates"])
+
+
 def _extract_faults_from_info(
     fault_info_list: FeatureCollection,
     fault_system: FaultSystem,
@@ -241,8 +290,8 @@ def _extract_faults_from_info(
     """
     faults = []
 
-    for fault_feature in fault_info_list.features:
-        wgs_coords = np.array(list(geojson.utils.coords(fault_feature)))
+    for fault_feature in fault_info_list["features"]:
+        wgs_coords = np.array(list(_geometry_coords(fault_feature["geometry"])))
         wgs_coords = wgs_coords[:, :2]
         fault_trace = shapely.LineString(
             coordinates.wgs_depth_to_nztm(np.array(wgs_coords)[:, ::-1])
@@ -251,13 +300,14 @@ def _extract_faults_from_info(
         fault_trace = shapely.remove_repeated_points(fault_trace, 0)
         trace_coords = np.array(fault_trace.coords)
 
-        fault_id = fault_feature.properties["FaultID"]
-        name = fault_feature.properties["ParentName"]
-        top = fault_feature.properties["UpDepth"]
-        bottom = fault_feature.properties["LowDepth"]
-        dip_dir = fault_feature.properties.get("DipDir")
-        dip = fault_feature.properties["DipDeg"]
-        rake = fault_feature.properties["Rake"]
+        properties = fault_feature["properties"]
+        fault_id = properties["FaultID"]
+        name = properties["ParentName"]
+        top = properties["UpDepth"]
+        bottom = properties["LowDepth"]
+        dip_dir = properties.get("DipDir")
+        dip = properties["DipDeg"]
+        rake = properties["Rake"]
 
         if not shapely.equals_exact(fault_trace, fault_trace_old):
             warnings.warn(f"Fault trace for {name!r} was altered.", UserWarning)
@@ -467,7 +517,7 @@ def _merge_branches(solutions: Iterator[tuple[float, ZipFile]]) -> NSHMSolution:
 
     with first_solution:
         with first_solution.open(str(FAULT_INFORMATION_PATH)) as fault_info_handle:
-            fault_collection = geojson.load(fault_info_handle)
+            fault_collection = json.load(fault_info_handle)
 
         fault_system = infer_fault_system(fault_collection)
 

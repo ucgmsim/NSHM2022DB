@@ -245,7 +245,7 @@ def to_sql(
     limit: int = 100,
     fault_count_limit: int | None = None,
 ) -> tuple[str, list[Any]]:
-    """Construct a DuckDB SQL query using a rich expression language and variable bounds.
+    """Construct a SQLite query using a rich expression language and variable bounds.
 
     The query parameter is expected to be a string that expresses the
     logical inclusion of some faults in the desired ruptures.
@@ -268,7 +268,7 @@ def to_sql(
     Returns
     -------
     sql_query
-        The query compiled to DuckDB compatible SQL.
+        The query compiled to SQLite compatible SQL.
     parameters
         The query parameters to be supplied.
 
@@ -361,7 +361,7 @@ def to_sql(
         parameters.append(fault_count_limit)
 
     sql_expression = f"""SELECT
-     rupture.rupture_id, ANY_VALUE(rupture.nshm_id), ANY_VALUE(rupture.fault_system), ANY_VALUE(rupture.magnitude), ANY_VALUE(rupture.area), ANY_VALUE(rupture.len), ANY_VALUE(rupture.rate)
+     rupture.rupture_id, rupture.nshm_id, rupture.fault_system, rupture.magnitude, rupture.area, rupture.len, rupture.rate
     FROM rupture
     JOIN
         rupture_faults ON rupture.rupture_id = rupture_faults.rupture_id
@@ -372,7 +372,7 @@ def to_sql(
     WHERE rupture.rate IS NOT NULL {magnitude_expression} {rate_expression}
     GROUP BY rupture.rupture_id
     HAVING {fault_count_expression} ({expression_to_sql(expression)})
-    ORDER BY ANY_VALUE(rupture.rate)
+    ORDER BY rupture.rate
     DESC NULLS LAST
     LIMIT ?
     """

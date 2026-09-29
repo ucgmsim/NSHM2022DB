@@ -20,7 +20,6 @@ from sqlite3 import Connection
 from types import TracebackType
 from typing import Self
 
-import duckdb
 import numpy as np
 import pandas as pd
 
@@ -732,32 +731,32 @@ class NSHMDB(contextlib.AbstractContextManager):
         dict[int, Rupture]
             A mapping from rupture id to Rupture object for each rupture satisfying the query parameters.
         """
-        with duckdb.connect(self.db_filepath) as conn:
-            sql_query, parameters = query.to_sql(
-                query_str,
-                rate_bounds=rate_bounds,
-                magnitude_bounds=magnitude_bounds,
-                limit=limit,
-                fault_count_limit=fault_count_limit,
+        conn = self.connection()
+        sql_query, parameters = query.to_sql(
+            query_str,
+            rate_bounds=rate_bounds,
+            magnitude_bounds=magnitude_bounds,
+            limit=limit,
+            fault_count_limit=fault_count_limit,
+        )
+        ruptures = conn.execute(sql_query, parameters).fetchall()
+        return {
+            nshm_id: Rupture(
+                rupture_nshm_id=nshm_id,
+                fault_system=fault_system,
+                magnitude=magnitude,
+                area=area,
+                length=length,
+                rate=rate,
+                faults=self.get_rupture_faults(fault_system, nshm_id),
             )
-            ruptures = conn.sql(sql_query, params=parameters).fetchall()
-            return {
-                nshm_id: Rupture(
-                    rupture_nshm_id=nshm_id,
-                    fault_system=fault_system,
-                    magnitude=magnitude,
-                    area=area,
-                    length=length,
-                    rate=rate,
-                    faults=self.get_rupture_faults(fault_system, nshm_id),
-                )
-                for (
-                    _internal_id,
-                    nshm_id,
-                    fault_system,
-                    magnitude,
-                    area,
-                    length,
-                    rate,
-                ) in ruptures
-            }
+            for (
+                _internal_id,
+                nshm_id,
+                fault_system,
+                magnitude,
+                area,
+                length,
+                rate,
+            ) in ruptures
+        }
