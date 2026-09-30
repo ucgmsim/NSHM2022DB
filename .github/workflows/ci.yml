@@ -5,7 +5,7 @@ jobs:
     uses: ucgmsim/meta-ci-action/.github/workflows/ci.yml@main
     with:
       package-dir: nshmdb
-      system-packages: "gmt libgmt-dev ghostscript gdal-bin libgdal-dev"
+      system-packages: "gdal-bin libgdal-dev"
       uv-extra-args: "--all-groups"
       enable-coverage: true
       cov-package: nshmdb
