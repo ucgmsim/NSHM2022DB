@@ -7,7 +7,12 @@ name = "nshmdb"
 authors = [{name="ucgmsim"}]
 description = "A library for working with 2022 NSHM fault geometry"
 readme = "README.md"
-requires-python = ">=3.11"
+# Python 3.15 is blocked by h5py, pulled in by source-modelling (whose
+# Fault/Plane types nshmdb returns). h5py has no cp315 wheels on PyPI yet (they are expected with h5py 3.17,
+# see https://github.com/h5py/h5py/issues/2972), and building it from the
+# sdist needs a system HDF5.
+# Lift the cap once h5py ships cp315 wheels.
+requires-python = ">=3.11,<3.15"
 dynamic = ["version"]
 dependencies = [
     "numpy>=1.26.0",
