@@ -75,7 +75,19 @@ def main(
         If flag is set, skip rupture creation.
     skip_mfds_creation : bool, optional
         If flag is set, skip MFDS creation.
+
+    Raises
+    ------
+    typer.BadParameter
+        If `sqlite_db_path` already exists.
     """
+    # Checked before the download, which is slow, and before NSHMDB opens
+    # the file, which would otherwise insert duplicate rows into it.
+    if sqlite_db_path.exists():
+        raise typer.BadParameter(
+            f"{sqlite_db_path} already exists; remove it or choose another path.",
+            param_hint="SQLITE_DB_PATH",
+        )
     nshm_version = _parse_version(version)
     solution = api.download_composite_solution(api_key, nshm_version)
     with NSHMDB(sqlite_db_path) as db:
