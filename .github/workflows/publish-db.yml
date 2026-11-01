@@ -1,0 +1,109 @@
+name: Publish database
+run-name: >-
+  Publish NSHM database for
+  ${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}
+
+# Builds the NSHM database from the released source and uploads it to the
+# public Dropbox folder:
+#
+#   nshmdb-vX.Y.Z.zip          The database (nshmdb.db), zipped.
+#   nshmdb-vX.Y.Z.zip.sha256   Its checksum.
+#
+# The zip's link and checksum are also added to the release description.
+#
+# Needs secrets:
+#   NSHMDB_API_KEY  Weka API key the generator downloads solutions with.
+#   RCLONE_CONFIG   An rclone config, base64-encoded (`base64 -w0 rclone.conf`),
+#                   with a `dropbox` remote that can write to and share from
+#                   the folder below.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to build the database for"
+        required: true
+        type: string
+
+# Each tag gets its own group, and a running build is never cancelled.
+concurrency:
+  group: publish-db-${{ github.event.release.tag_name || inputs.tag_name }}
+  cancel-in-progress: false
+
+permissions:
+  # Editing the release description.
+  contents: write
+
+env:
+  DROPBOX_DIR: "dropbox:/QuakeCoRE/Public/NSHMDB"
+  # The NSHM logic tree version the database is built from.
+  NSHM_VERSION: 1.0.4
+  TAG: ${{ github.event.release.tag_name || inputs.tag_name }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout nshmdb
+        # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.TAG }}
+          # setuptools-scm derives the version from the tags.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up uv
+        # v6
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          # A release build shouldn't restore a cache other runs could write.
+          enable-cache: false
+
+      - name: Build database
+        env:
+          NSHMDB_API_KEY: ${{ secrets.NSHMDB_API_KEY }}
+        run: uv run --no-dev nshmdb "$NSHM_VERSION" nshmdb.db
+
+      - name: Set up rclone
+        # It gets the Dropbox credentials, so it's pinned to a commit.
+        # v1
+        uses: AnimMouse/setup-rclone@26ef2133e09fd383329a1d4c1fbe6a71db1976c9
+        with:
+          rclone_config: ${{ secrets.RCLONE_CONFIG }}
+
+      - name: Upload to Dropbox
+        run: |
+          name="nshmdb-v${TAG#v}.zip"
+          zip -q "$name" nshmdb.db
+          sha=$(sha256sum "$name" | cut -d' ' -f1)
+          echo "$sha  $name" > "$name.sha256"
+          rclone copyto "$name" "$DROPBOX_DIR/$name"
+          rclone copyto "$name.sha256" "$DROPBOX_DIR/$name.sha256"
+          link=$(rclone link "$DROPBOX_DIR/$name")
+          {
+            echo "<!-- nshmdb-data -->"
+            echo "## Database"
+            echo
+            echo "| File | Contents | SHA-256 |"
+            echo "| --- | --- | --- |"
+            printf '| [%s](%s) | %s | `%s` |\n' "$name" "$link" \
+              "NSHM $NSHM_VERSION fault and rupture database (nshmdb.db)" "$sha"
+            echo "<!-- /nshmdb-data -->"
+          } > downloads.md
+          cat downloads.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Add the link to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Drop any table from an earlier run of this release, so a re-run
+          # replaces it rather than adding a second.
+          gh release view "$TAG" --json body --jq .body \
+            | sed '/<!-- nshmdb-data -->/,/<!-- \/nshmdb-data -->/d' > body.md
+          printf '\n' >> body.md
+          cat downloads.md >> body.md
+          gh release edit "$TAG" --notes-file body.md

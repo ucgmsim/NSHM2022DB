@@ -117,12 +117,12 @@ identifiers, so the database can be cross-referenced against the source NSHM
 solution.
 
 ## Obtain the database
-You likely don't need to obtain your own database, as they are published on Dropbox at `/QuakeCoRE/Public/NSHM` with every version release. Simply download that file and use it with the package:
+You likely don't need to obtain your own database, as one is published on Dropbox at `/QuakeCoRE/Public/NSHMDB` with every version release, as `nshmdb-vX.Y.Z.zip` (with a `.sha256` checksum beside it). Each GitHub release's description links to its zip. Download and unzip it, then use `nshmdb.db` with the package:
 
 ``` python
 from nshmdb.nshmdb import NSHMDB
 
-db = NSHMDB('nshmdb_v2026.06.1.db') # or whatever the latest version is.
+db = NSHMDB('nshmdb.db')
 ```
 
 ## Generate your own database
